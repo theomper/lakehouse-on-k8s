@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flink-app
+  namespace: data-processing
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flink-app
+  template:
+    metadata:
+      labels:
+        app: flink-app
+    spec:
+      serviceAccountName: flink-app-sa
+      containers:
+        - name: flink-app
+          image: acrlakehouseonk8s01.azurecr.io/flink-paimon:latest
+          imagePullPolicy: Always
+          env:
+            - name: AZURE_STORAGE_ACCOUNT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: azure-storage-secret
+                  key: fs.azure.account.key.stlakehouseonk8s01.dfs.core.windows.net
+            - name: HADOOP_CONF_DIR
+              value: /opt/flink/conf
+            - name: HADOOP_USER_NAME
+              value: root
+          # command:
+          #   - /bin/sh
+          #   - -c
+          #   - |
+          #     echo "[DEBUG] Writing core-site.xml..."
+          #     cat >/opt/flink/conf/core-site.xml <<EOF
+          #     <configuration>
+          #       <property>
+          #         <name>fs.azure.account.key.stlakehouseonk8s01.dfs.core.windows.net</name>
+          #         <value>${AZURE_STORAGE_ACCOUNT_KEY}</value>
+          #       </property>
+          #     </configuration>
+          #     EOF
+          #     echo "[DEBUG] Contents of core-site.xml:"
+          #     cat /opt/flink/conf/core-site.xml
+          #     ls -lh /opt/flink/lib/ | grep azure
+          #     /opt/flink/bin/sql-client.sh -f /opt/flink/sql/init-paimon.sql ;
+          #     echo "ExitCode=$?"; tail -f /dev/null
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flink-app-sa
+  namespace: data-processing
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: data-processing
+  name: flink-app-role
+rules:
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: flink-app-rolebinding
+  namespace: data-processing
+subjects:
+- kind: ServiceAccount
+  name: flink-app-sa
+  namespace: data-processing
+roleRef:
+  kind: Role
+  name: flink-app-role
+  apiGroup: rbac.authorization.k8s.io

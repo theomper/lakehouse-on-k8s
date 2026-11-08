@@ -1,0 +1,123 @@
+﻿================================================================================
+  Experiment Metrics (BATCHED) - T0-baseline
+  Homes: 15000  |  Type: batched  |  Timestamp: 2026-05-10 19:33:47
+================================================================================
+
+flink_job_id                                       = 8b97e09fd617e694d02cce61ba0f0e50
+── kubectl_top_flink ──
+NAME                                 CPU(cores)   MEMORY(bytes)   
+flink-jobmanager-546d55bf4f-8vwvc    24m          677Mi           
+flink-taskmanager-86c48bb565-5blmm   18m          1453Mi          
+flink-taskmanager-86c48bb565-fffml   2671m        4312Mi          
+
+prom_node_cpu_total                                = {"status":"success","data":{"resultType":"vector","result":[{"metric":{"node":"aks-userpool-17074288-vmss00000a"},"value":[1778441784.406,"1.2527555443230975"]},{"metric":{"node":"aks-userpool-17074288-vmss00000b"},"value":[1778441784.406,"8.03039892914603"]},{"metric":{"node":"aks-systempool-31759774-vmss000005"},"value":[1778441784.406,"0.11628400199315243"]}]}}
+prom_flink_mem                                     = {"status":"success","data":{"resultType":"vector","result":[{"metric":{"pod":"flink-taskmanager-86c48bb565-5blmm"},"value":[1778441750.191,"3029340160"]},{"metric":{"pod":"flink-taskmanager-86c48bb565-fffml"},"value":[1778441750.191,"9071538176"]},{"metric":{"pod":"flink-jobmanager-546d55bf4f-8vwvc"},"value":[1778441750.191,"1399123968"]}]}}
+prom_flink_idle_time_ms_per_sec                    = {"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1778441784.389,"685.5294117647059"]}]}}
+trino_q2_raw_groupby_min_ms                        = 19386
+trino_q1_count_raw_min_ms                          = 10433
+prom_flink_checkpoint_size                         = {"status":"success","data":{"resultType":"vector","result":[{"metric":{"__name__":"flink_jobmanager_job_lastCheckpointFullSize","container":"jobmanager","endpoint":"metrics","host":"flink_jobmanager","instance":"10.244.0.110:9249","job":"data-processing/flink-metrics","job_id":"8b97e09fd617e694d02cce61ba0f0e50","job_name":"insert_into_paimon_iot_sensor_data_raw","namespace":"data-processing","pod":"flink-jobmanager-546d55bf4f-8vwvc"},"value":[1778441784.185,"14819"]}]}}
+── kubectl_top_kafka ──
+NAME      CPU(cores)   MEMORY(bytes)   
+kafka-0   79m          4817Mi          
+kafka-1   77m          4770Mi          
+
+trino_q4_join_median_ms                            = 19372
+kafka_general_offset                               = 4590000
+kafka_plug_offset                                  = 18480000
+── kubectl_top_producer ──
+NAME                                              CPU(cores)   MEMORY(bytes)   
+go-batched-iot-sim-15000h-pod0-677464d6c8-p2lz6   188m         120Mi           
+go-batched-iot-sim-15000h-pod1-659bbbdb4-6n2vr    160m         123Mi           
+go-batched-iot-sim-15000h-pod2-66c6f59fc9-5cl7r   191m         121Mi           
+go-batched-iot-sim-15000h-pod3-7ff8fd8964-5xfqn   153m         129Mi           
+go-batched-iot-sim-15000h-pod4-7c466fc5d7-jnghk   57m          43Mi            
+
+trino_q4_join_max_ms                               = 29410
+trino_raw_count                                    = 21450000
+trino_distinct_homes_raw                           = 15000
+phase                                              = T0-baseline
+prom_flink_busy_time_ms_per_sec                    = {"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1778441783.873,"172.2941176470588"]}]}}
+trino_q5_percentile_min_ms                         = 18182
+── producer_last_cycle ──
+[cycle] homes=1000 avg=100ms max=105ms interval=1.0s saturated=false
+[cycle] homes=1000 avg=99ms max=104ms interval=1.0s saturated=false
+[cycle] homes=1000 avg=99ms max=104ms interval=1.0s saturated=false
+[cycle] homes=1000 avg=101ms max=106ms interval=1.0s saturated=false
+[cycle] homes=1000 avg=98ms max=104ms interval=1.0s saturated=false
+
+prom_flink_records_out_per_sec                     = {"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1778441783.815,"150237.65"]}]}}
+trino_q2_raw_groupby_median_ms                     = 23577
+prom_flink_records_in_per_sec                      = {"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1778441783.710,"150287.03333333333"]}]}}
+── producer_last_stats ──
+[stats] ok=895000 err=0 total=895850 rps=5000
+[stats] ok=1195000 err=0 total=1195863 rps=5000
+[stats] ok=1495000 err=0 total=1495828 rps=4999
+[stats] ok=1795000 err=0 total=1795867 rps=5001
+[stats] ok=2095000 err=0 total=2095797 rps=4999
+
+trino_q1_count_raw_median_ms                       = 18153
+expected_rps                                       = 75000
+trino_total_energy_kwh                             = 0.0
+trino_q4_join_min_ms                               = 3963
+prom_producer_mem                                  = {"status":"success","data":{"resultType":"vector","result":[{"metric":{"pod":"go-batched-iot-sim-15000h-pod0-677464d6c8-p2lz6"},"value":[1778441784.232,"252141568"]},{"metric":{"pod":"go-batched-iot-sim-15000h-pod4-7c466fc5d7-jnghk"},"value":[1778441784.232,"91557888"]},{"metric":{"pod":"go-batched-iot-sim-15000h-pod2-66c6f59fc9-5cl7r"},"value":[1778441784.232,"251101184"]},{"metric":{"pod":"go-batched-iot-sim-15000h-pod1-659bbbdb4-6n2vr"},"value":[1778441784.232,"253755392"]},{"metric":{"pod":"go-batched-iot-sim-15000h-pod3-7ff8fd8964-5xfqn"},"value":[1778441784.232,"271118336"]}]}}
+trino_10min_count                                  = 0
+trino_distinct_homes_30min                         = 0
+prom_flink_cpu                                     = {"status":"success","data":{"resultType":"vector","result":[{"metric":{"pod":"flink-taskmanager-86c48bb565-5blmm"},"value":[1778441750.052,"0.030045154514256055"]},{"metric":{"pod":"flink-taskmanager-86c48bb565-fffml"},"value":[1778441750.052,"4.2884601097011465"]},{"metric":{"pod":"flink-jobmanager-546d55bf4f-8vwvc"},"value":[1778441750.052,"0.03517269509522739"]}]}}
+prom_node_mem_total                                = {"status":"success","data":{"resultType":"vector","result":[{"metric":{"node":"aks-userpool-17074288-vmss00000a"},"value":[1778441784.308,"22176239616"]},{"metric":{"node":"aks-userpool-17074288-vmss00000b"},"value":[1778441784.308,"70654918656"]},{"metric":{"node":"aks-systempool-31759774-vmss000005"},"value":[1778441784.308,"5101121536"]}]}}
+trino_q3_window_fn_max_ms                          = 30731
+timestamp                                          = 2026-05-10 19:33:47
+trino_q3_window_fn_min_ms                          = 20286
+── kafka_plug_raw ──
+iot-sensor-plug:0:2332811
+iot-sensor-plug:1:2322548
+iot-sensor-plug:2:2353026
+iot-sensor-plug:3:2320993
+iot-sensor-plug:4:2332189
+iot-sensor-plug:5:2341519
+iot-sensor-plug:6:2311974
+iot-sensor-plug:7:2344940
+
+kafka_total_offset                                 = 23070000
+flink_job_metrics                                  = []
+prom_trino_mem                                     = {"status":"success","data":{"resultType":"vector","result":[{"metric":{"pod":"trino-standalone-trino-coordinator-cfb5cfb67-5kftq"},"value":[1778441784.301,"19891355648"]},{"metric":{"pod":"trino-standalone-trino-worker-7b987694dc-qpzh2"},"value":[1778441784.301,"19664441344"]},{"metric":{"pod":"trino-standalone-trino-worker-7b987694dc-65ms9"},"value":[1778441784.301,"17859891200"]}]}}
+trino_count_raw_latency_ms                         = 7380
+── kafka_general_raw ──
+iot-sensor-general:0:1159559
+iot-sensor-general:1:1157705
+iot-sensor-general:2:1158941
+iot-sensor-general:3:1160795
+
+producer_final                                     = 
+prom_producer_cpu                                  = {"status":"success","data":{"resultType":"vector","result":[{"metric":{"pod":"go-batched-iot-sim-15000h-pod0-677464d6c8-p2lz6"},"value":[1778441772.226,"0.37024855883761165"]},{"metric":{"pod":"go-batched-iot-sim-15000h-pod4-7c466fc5d7-jnghk"},"value":[1778441772.226,"0.1089559207630866"]},{"metric":{"pod":"go-batched-iot-sim-15000h-pod2-66c6f59fc9-5cl7r"},"value":[1778441772.226,"0.37238330142947806"]},{"metric":{"pod":"go-batched-iot-sim-15000h-pod1-659bbbdb4-6n2vr"},"value":[1778441772.226,"0.32827014003101795"]},{"metric":{"pod":"go-batched-iot-sim-15000h-pod3-7ff8fd8964-5xfqn"},"value":[1778441772.226,"0.3158228067186156"]}]}}
+trino_30min_count                                  = 0
+trino_avg_voltage                                  = 
+prom_trino_cpu                                     = {"status":"success","data":{"resultType":"vector","result":[{"metric":{"pod":"trino-standalone-trino-coordinator-cfb5cfb67-5kftq"},"value":[1778441783.992,"1.4453576938095858"]},{"metric":{"pod":"trino-standalone-trino-worker-7b987694dc-qpzh2"},"value":[1778441783.992,"0.9036083598103994"]},{"metric":{"pod":"trino-standalone-trino-worker-7b987694dc-65ms9"},"value":[1778441783.992,"0.8228137647828659"]}]}}
+trino_q5_percentile_max_ms                         = 30309
+── kubectl_top_trino ──
+NAME                                                 CPU(cores)   MEMORY(bytes)   
+trino-standalone-trino-coordinator-cfb5cfb67-5kftq   1338m        9485Mi          
+trino-standalone-trino-worker-7b987694dc-65ms9       910m         8516Mi          
+trino-standalone-trino-worker-7b987694dc-qpzh2       899m         9377Mi          
+
+trino_q3_window_fn_median_ms                       = 22500
+e2e_latest_raw_ts                                  = 2026-05-10 19:34:28.487
+prom_kafka_consumer_lag_max                        = {"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1778441784.138,"151694"]}]}}
+flink_running_jobs                                 = 1
+── kubectl_top_nodes ──
+NAME                                 CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)   
+aks-systempool-31759774-vmss000005   201m         10%      4012Mi          69%         
+aks-userpool-17074288-vmss00000a     737m         9%       10931Mi         18%         
+aks-userpool-17074288-vmss00000b     6183m        79%      34702Mi         58%         
+
+flink_jobs_json                                    = {"jobs":[{"id":"8b97e09fd617e694d02cce61ba0f0e50","status":"RUNNING"}]}
+prom_kafka_mem                                     = {"status":"success","data":{"resultType":"vector","result":[{"metric":{"pod":"kafka-0"},"value":[1778441770.786,"9980538880"]},{"metric":{"pod":"kafka-1"},"value":[1778441770.786,"9946460160"]}]}}
+prom_flink_backpressured_time_ms_per_sec           = {"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1778441784.347,"142.1764705882353"]}]}}
+prom_kafka_cpu                                     = {"status":"success","data":{"resultType":"vector","result":[{"metric":{"pod":"kafka-0"},"value":[1778441750.211,"0.2198221532315071"]},{"metric":{"pod":"kafka-1"},"value":[1778441750.211,"0.15374562727115793"]}]}}
+trino_peak_power_w                                 = 0.0
+trino_q2_raw_groupby_max_ms                        = 31124
+trino_q1_count_raw_max_ms                          = 24960
+prom_flink_checkpoint_duration                     = {"status":"success","data":{"resultType":"vector","result":[{"metric":{"__name__":"flink_jobmanager_job_lastCheckpointDuration","container":"jobmanager","endpoint":"metrics","host":"flink_jobmanager","instance":"10.244.0.110:9249","job":"data-processing/flink-metrics","job_id":"8b97e09fd617e694d02cce61ba0f0e50","job_name":"insert_into_paimon_iot_sensor_data_raw","namespace":"data-processing","pod":"flink-jobmanager-546d55bf4f-8vwvc"},"value":[1778441784.431,"9136"]}]}}
+producer_type                                      = batched
+trino_q5_percentile_median_ms                      = 23097
+e2e_latency_seconds                                = 78.1
+homes                                              = 15000

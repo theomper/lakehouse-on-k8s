@@ -1,0 +1,41 @@
+# .github/workflows/trino-paimon-image.yml
+name: Build & Push Trino Paimon image
+
+on:
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: trino-paimon
+  TRINO_VERSION: "440"
+  ACR_LOGIN_SERVER: acrlakehouseonk8s01.azurecr.io
+
+jobs:
+  build-and-push:
+    name: Build & Push Trino Paimon image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Azure CLI login
+        uses: azure/login@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Docker login to ACR
+        run: az acr login --name ${{ env.ACR_LOGIN_SERVER }}
+
+      - name: Build Docker Image
+        run: |
+          docker build \
+            --build-arg TRINO_VERSION=${{ env.TRINO_VERSION }} \
+            -f docker/trino-paimon.Dockerfile \
+            -t "${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.TRINO_VERSION }}" \
+            -t "${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest" \
+            docker
+
+      - name: Push Docker Image to ACR
+        run: |
+          docker push "${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.TRINO_VERSION }}"
+          docker push "${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest"

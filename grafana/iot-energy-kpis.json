@@ -1,0 +1,872 @@
+{
+  "uid": "iot-energy-kpis",
+  "title": "IoT Energy KPIs \u2013 Lakehouse (Paimon + Trino)",
+  "timezone": "browser",
+  "schemaVersion": 41,
+  "version": 1,
+  "refresh": "5m",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "tags": [
+    "iot",
+    "paimon",
+    "trino",
+    "kpi",
+    "lakehouse"
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "home_id",
+        "label": "Homes",
+        "type": "query",
+        "datasource": {
+          "type": "trino-datasource",
+          "uid": "PD73EC80E50767796"
+        },
+        "refresh": 1,
+        "hide": 0,
+        "multi": true,
+        "includeAll": true,
+        "sort": 1,
+        "query": "SELECT DISTINCT home_id FROM paimon.iot.sensor_data_10min WHERE dt >= date_format(current_date - interval '1' day, '%Y-%m-%d') ORDER BY 1",
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": true
+        }
+      },
+      {
+        "name": "plug_id",
+        "label": "Plugs (non-general)",
+        "type": "query",
+        "datasource": {
+          "type": "trino-datasource",
+          "uid": "PD73EC80E50767796"
+        },
+        "refresh": 2,
+        "hide": 0,
+        "multi": true,
+        "includeAll": true,
+        "sort": 1,
+        "query": "SELECT DISTINCT plug_id FROM paimon.iot.sensor_data_10min WHERE dt >= date_format(current_date - interval '1' day, '%Y-%m-%d') AND plug_id <> 'general' AND home_id IN (${home_id:sqlstring}) ORDER BY 1",
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": true
+        }
+      },
+      {
+        "name": "single_home",
+        "label": "Home (for plug breakdown)",
+        "type": "query",
+        "datasource": {
+          "type": "trino-datasource",
+          "uid": "PD73EC80E50767796"
+        },
+        "refresh": 2,
+        "hide": 0,
+        "multi": false,
+        "includeAll": false,
+        "sort": 1,
+        "query": "SELECT DISTINCT home_id FROM paimon.iot.sensor_data_10min WHERE dt >= date_format(current_date - interval '1' day, '%Y-%m-%d') AND home_id IN (${home_id:sqlstring}) ORDER BY 1",
+        "current": {
+          "text": "$__all",
+          "value": "$__all",
+          "selected": true
+        }
+      },
+      {
+        "name": "top_n",
+        "label": "Top N",
+        "type": "custom",
+        "hide": 0,
+        "query": "5,10,20",
+        "current": {
+          "text": "10",
+          "value": "10",
+          "selected": true
+        },
+        "options": [
+          {
+            "text": "5",
+            "value": "5",
+            "selected": false
+          },
+          {
+            "text": "10",
+            "value": "10",
+            "selected": true
+          },
+          {
+            "text": "20",
+            "value": "20",
+            "selected": false
+          }
+        ]
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Total Energy (kWh)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "PD73EC80E50767796"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "WITH s AS (\n  SELECT COALESCE(SUM(energy_kwh), 0) AS total_kwh\n  FROM paimon.iot.sensor_data_10min\n  WHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                        AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n    AND plug_id = 'general'\n    AND home_id IN (${home_id:sqlstring})\n)\nSELECT total_kwh AS value FROM s\n"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "unit": "kwh"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Peak Demand (kW)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "PD73EC80E50767796"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "WITH hourly_load AS (\n  SELECT\n    window_start,\n    SUM(avg_voltage * avg_current * avg_pf) / 1000.0 AS kw\n  FROM paimon.iot.sensor_data_10min\n  WHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                        AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n    AND plug_id = 'general'\n    AND home_id IN (${home_id:sqlstring})\n  GROUP BY 1\n)\nSELECT COALESCE(MAX(kw), 0) AS value FROM hourly_load\n"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "unit": "kw"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Avg Daily Energy (kWh/day)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "PD73EC80E50767796"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "WITH s AS (\n  SELECT COALESCE(SUM(energy_kwh), 0) AS total_kwh\n  FROM paimon.iot.sensor_data_10min\n  WHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                        AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n    AND plug_id = 'general'\n    AND home_id IN (${home_id:sqlstring})\n),\nd AS (\n  SELECT GREATEST(1.0, (${__to:date:seconds} - ${__from:date:seconds}) / 86400.0) AS days\n)\nSELECT (s.total_kwh / d.days) AS value\nFROM s CROSS JOIN d\n"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "unit": "kwh"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Active Homes",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "PD73EC80E50767796"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT COUNT(DISTINCT home_id) AS value\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND plug_id = 'general'\n  AND home_id IN (${home_id:sqlstring})\n"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "unit": "none"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Grid Load (kW) \u2013 sum of homes",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "PD73EC80E50767796"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "rawSQL": "SELECT\n  window_start AS time,\n  SUM(avg_voltage * avg_current * avg_pf) / 1000.0 AS value,\n  'grid_load_kw' AS metric\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND plug_id = 'general'\n  AND home_id IN (${home_id:sqlstring})\nGROUP BY 1\nORDER BY 1 ASC\n"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kw"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "placement": "bottom",
+          "displayMode": "list"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Energy by Home (kWh/10 min)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "PD73EC80E50767796"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "rawSQL": "SELECT\n  window_start AS time,\n  SUM(energy_kwh) AS value,\n  home_id AS metric\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND plug_id = 'general'\n  AND home_id IN (${home_id:sqlstring})\nGROUP BY 1, 3\nORDER BY 1 ASC\n"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwh"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "placement": "bottom",
+          "displayMode": "list"
+        },
+        "tooltip": {
+          "mode": "single"
+        },
+        "stacking": {
+          "mode": "normal",
+          "group": "A"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Peak Power by Home (W) \u2013 10 min",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "PD73EC80E50767796"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "rawSQL": "SELECT\n  window_start AS time,\n  MAX(peak_power_w) AS value,\n  home_id AS metric\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND plug_id = 'general'\n  AND home_id IN (${home_id:sqlstring})\nGROUP BY 1, 3\nORDER BY 1 ASC\n"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "placement": "bottom",
+          "displayMode": "list"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "barchart",
+      "title": "Top ${top_n} Homes by Energy (kWh)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "PD73EC80E50767796"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 22
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT\n  home_id,\n  SUM(energy_kwh) AS value\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND plug_id = 'general'\n  AND home_id IN (${home_id:sqlstring})\nGROUP BY 1\nORDER BY value DESC\nLIMIT ${top_n}\n"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwh"
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "auto",
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "piechart",
+      "title": "Plug Breakdown \u2013 ${single_home}",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "PD73EC80E50767796"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 22
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT\n  plug_id AS metric,\n  SUM(energy_kwh) AS value\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND plug_id <> 'general'\n  AND home_id = ${single_home:sqlstring}\nGROUP BY 1\nORDER BY value DESC\n"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Consistency Check (W) \u2013 ${single_home}: general vs \u03a3 plugs (10-min)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "PD73EC80E50767796"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "rawSQL": "WITH agg AS (\n  SELECT\n    window_start AS t,\n    MAX(CASE WHEN plug_id = 'general' THEN avg_voltage * avg_current * avg_pf END) AS home_w,\n    SUM(CASE WHEN plug_id <> 'general' THEN avg_voltage * avg_current * avg_pf END) AS sum_plugs_w\n  FROM paimon.iot.sensor_data_10min\n  WHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                        AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n    AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n    AND home_id = ${single_home:sqlstring}\n  GROUP BY 1\n)\nSELECT t AS time, home_w AS value, 'home_general_w' AS metric FROM agg\nUNION ALL\nSELECT t AS time, sum_plugs_w AS value, 'sum_plugs_w' AS metric FROM agg\nUNION ALL\nSELECT t AS time, (home_w - sum_plugs_w) AS value, 'diff_w' AS metric FROM agg\nORDER BY time ASC\n"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "placement": "bottom",
+          "displayMode": "list"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Selected Plugs \u2013 Avg Real Power (W, 10-min)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "PD73EC80E50767796"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "rawSQL": "SELECT\n  window_start AS time,\n  AVG(avg_voltage * avg_current * avg_pf) AS value,\n  CONCAT(home_id, '/', plug_id) AS metric\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND plug_id <> 'general'\n  AND home_id IN (${home_id:sqlstring})\n  AND plug_id IN (${plug_id:sqlstring})\nGROUP BY 1, 3\nORDER BY 1 ASC\n"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "placement": "bottom",
+          "displayMode": "list"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Hour-of-Day \u00d7 Day-of-Week (Avg W) \u2013 table (pivot to heatmap)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "PD73EC80E50767796"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT\n  day_of_week(window_start) AS day_of_week,\n  hour(window_start) AS hour_of_day,\n  AVG(avg_voltage * avg_current * avg_pf) AS avg_w\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND plug_id = 'general'\n  AND home_id IN (${home_id:sqlstring})\nGROUP BY 1, 2\nORDER BY 1, 2\n"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Monthly Trend (kWh)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "PD73EC80E50767796"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 54
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "rawSQL": "SELECT\n  date_trunc('month', window_start) AS time,\n  SUM(energy_kwh) AS value,\n  'monthly_kwh' AS metric\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND plug_id = 'general'\n  AND home_id IN (${home_id:sqlstring})\nGROUP BY 1\nORDER BY 1 ASC\n"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwh"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "placement": "bottom",
+          "displayMode": "list"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Ingest Lag (seconds)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "PD73EC80E50767796"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 62
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT\n  COALESCE(date_diff('second', MAX(ts), CURRENT_TIMESTAMP), 0) AS value\nFROM paimon.iot.sensor_data_raw\nWHERE dt >= date_format(current_date - interval '1' day, '%Y-%m-%d')\n  AND ts >= CAST(CURRENT_TIMESTAMP - INTERVAL '15' MINUTE AS TIMESTAMP(3))\n  AND plug_id = 'general'\n  AND home_id IN (${home_id:sqlstring})\n"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Voltage out-of-range (% of 10-min windows)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "PD73EC80E50767796"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 62
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT\n  100.0 * COALESCE(SUM(CASE WHEN avg_voltage < 210 OR avg_voltage > 250 THEN 1 ELSE 0 END),0)\n      / NULLIF(COUNT(*),0) AS value\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND plug_id = 'general'\n  AND home_id IN (${home_id:sqlstring})\n"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "unit": "percent"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Avg Power Factor (10-min)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "PD73EC80E50767796"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 62
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT\n  COALESCE(AVG(avg_pf), 0) AS value\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND plug_id = 'general'\n  AND home_id IN (${home_id:sqlstring})\n"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "unit": "none"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Avg Voltage (V, 10-min)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "PD73EC80E50767796"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 62
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT\n  COALESCE(AVG(avg_voltage), 0) AS value\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND plug_id = 'general'\n  AND home_id IN (${home_id:sqlstring})\n"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "unit": "volt"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Event Rate (events/min, 10-min granularity)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "PD73EC80E50767796"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 66
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "rawSQL": "SELECT\n  window_start AS time,\n  SUM(samples) / 10.0 AS value,\n  CASE WHEN plug_id = 'general' THEN 'general_events' ELSE 'plug_events' END AS metric\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND home_id IN (${home_id:sqlstring})\nGROUP BY 1, 3\nORDER BY 1 ASC\n"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "placement": "bottom",
+          "displayMode": "list"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "table",
+      "title": "Latest RAW readings (top 100, last 15 min)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "PD73EC80E50767796"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 72
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT\n  ts,\n  home_id,\n  plug_id,\n  voltage,\n  current_amp,\n  power_factor,\n  (COALESCE(voltage,0) * COALESCE(current_amp,0) * COALESCE(power_factor,0)) AS real_power_w,\n  energy_wh\nFROM paimon.iot.sensor_data_raw\nWHERE dt >= date_format(current_date - interval '1' day, '%Y-%m-%d')\n  AND ts >= CAST(CURRENT_TIMESTAMP - INTERVAL '15' MINUTE AS TIMESTAMP(3))\n  AND home_id IN (${home_id:sqlstring})\nORDER BY ts DESC\nLIMIT 100\n"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    }
+  ]
+}

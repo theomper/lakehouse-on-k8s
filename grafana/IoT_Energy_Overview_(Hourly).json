@@ -1,0 +1,110 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_TRINO",
+      "label": "Trino",
+      "description": "",
+      "type": "datasource",
+      "pluginId": "trino-datasource",
+      "pluginName": "Trino"
+    }
+  ],
+  "title": "IoT Energy Overview (Hourly)",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5m",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Total Energy (kWh) per Hour",
+      "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+          "rawSql": "SELECT window_start AS \"time\", SUM(energy_kwh) AS \"kWh\" FROM paimon.iot.sensor_data_hourly WHERE $__timeFilter(window_start) AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d') GROUP BY 1 ORDER BY 1",
+          "format": 0
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Fleet Peak Power (kW) per Hour",
+      "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+          "rawSql": "SELECT window_start AS \"time\", MAX(peak_power_w) / 1000.0 AS \"peak_kW\" FROM paimon.iot.sensor_data_hourly WHERE $__timeFilter(window_start) AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d') GROUP BY 1 ORDER BY 1",
+          "format": 0
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Total Samples per Hour (Ingestion Volume)",
+      "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 9 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+          "rawSql": "SELECT window_start AS \"time\", SUM(samples) AS \"samples\" FROM paimon.iot.sensor_data_hourly WHERE $__timeFilter(window_start) AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d') GROUP BY 1 ORDER BY 1",
+          "format": 0
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Average Power Factor (Fleet)",
+      "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 9 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+          "rawSql": "SELECT window_start AS \"time\", AVG(avg_pf) AS \"avg_pf\" FROM paimon.iot.sensor_data_hourly WHERE $__timeFilter(window_start) AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d') GROUP BY 1 ORDER BY 1",
+          "format": 0
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Top 10 Homes by Energy (kWh) in Time Range",
+      "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 18 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+          "rawSql": "SELECT home_id, SUM(energy_kwh) AS kwh FROM paimon.iot.sensor_data_hourly WHERE $__timeFilter(window_start) AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d') GROUP BY 1 ORDER BY 2 DESC LIMIT 10",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Top 10 Plugs by Energy (kWh) in Time Range",
+      "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 18 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+          "rawSql": "SELECT home_id, plug_id, SUM(energy_kwh) AS kwh FROM paimon.iot.sensor_data_hourly WHERE $__timeFilter(window_start) AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d') GROUP BY 1,2 ORDER BY 3 DESC LIMIT 10",
+          "format": 1
+        }
+      ]
+    }
+  ]
+}

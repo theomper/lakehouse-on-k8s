@@ -1,0 +1,110 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_TRINO",
+      "label": "Trino",
+      "description": "",
+      "type": "datasource",
+      "pluginId": "trino-datasource",
+      "pluginName": "Trino"
+    }
+  ],
+  "title": "IoT Power Quality & Voltage (Hourly)",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5m",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Average Voltage (Fleet)",
+      "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+          "rawSql": "SELECT window_start AS \"time\", AVG(avg_voltage) AS \"avg_voltage\" FROM paimon.iot.sensor_data_hourly WHERE $__timeFilter(window_start) AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d') GROUP BY 1 ORDER BY 1",
+          "format": 0
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Voltage Range Across Homes (min/avg/max of hourly averages)",
+      "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+          "rawSql": "SELECT window_start AS \"time\", MIN(avg_voltage) AS \"min_v\", AVG(avg_voltage) AS \"avg_v\", MAX(avg_voltage) AS \"max_v\" FROM paimon.iot.sensor_data_hourly WHERE $__timeFilter(window_start) AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d') GROUP BY 1 ORDER BY 1",
+          "format": 0
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Average Current (Fleet)",
+      "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 9 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+          "rawSql": "SELECT window_start AS \"time\", AVG(avg_current) AS \"avg_current\" FROM paimon.iot.sensor_data_hourly WHERE $__timeFilter(window_start) AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d') GROUP BY 1 ORDER BY 1",
+          "format": 0
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Distinct Homes Reporting per Hour",
+      "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 9 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+          "rawSql": "SELECT window_start AS \"time\", COUNT(DISTINCT home_id) AS \"homes\" FROM paimon.iot.sensor_data_hourly WHERE $__timeFilter(window_start) AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d') GROUP BY 1 ORDER BY 1",
+          "format": 0
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Worst Power Factor Homes (avg_pf) in Time Range",
+      "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 18 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+          "rawSql": "SELECT home_id, AVG(avg_pf) AS avg_pf FROM paimon.iot.sensor_data_hourly WHERE $__timeFilter(window_start) AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d') GROUP BY 1 ORDER BY 2 ASC LIMIT 10",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Lowest Sample Volume Homes (possible missing data)",
+      "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 18 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "trino-datasource", "uid": "${DS_TRINO}" },
+          "rawSql": "SELECT home_id, SUM(samples) AS samples FROM paimon.iot.sensor_data_hourly WHERE $__timeFilter(window_start) AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d') GROUP BY 1 ORDER BY 2 ASC LIMIT 10",
+          "format": 1
+        }
+      ]
+    }
+  ]
+}

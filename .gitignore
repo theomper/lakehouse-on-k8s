@@ -1,0 +1,68 @@
+# ---- Terraform ----
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraform.tfstate.lock.info
+.terraformrc
+terraform.rc
+# terraform.tfvars is intentionally committed with placeholder values only.
+
+# ---- Secrets / credentials (never commit) ----
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+kubeconfig
+*.kubeconfig
+.env
+.env.*
+*.env
+azure-credentials*.json
+service-principal*.json
+*_secret*
+*.secret
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+
+# ---- Go ----
+bin/
+*.exe
+*.test
+*.out
+
+# ---- Docker build artifacts ----
+docker/lib/
+
+# ---- Node (if any tooling is added) ----
+node_modules/
+
+# ---- Editor / OS ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# ---- DrawIO backups ----
+*.drawio.bkp
+
+# ---- Local experiment scratch ----
+experiments/results/**/*.tmp
+
+# ---- Local-only drafts (not for the public repo) ----
+docs/linkedin-post.md

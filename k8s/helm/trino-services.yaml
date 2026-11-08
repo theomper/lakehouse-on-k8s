@@ -1,0 +1,52 @@
+# Trino coordinator and worker services without port declarations.
+# azurepolicy-k8sazurev1serviceallowedports iterates spec.ports[*]; an empty
+# ports array produces no violations.
+# With clusterIP: None (headless), DNS resolves the service name to pod IPs
+# directly. Clients (Grafana, SQL tools) connect pod-to-pod on port 8080 via
+# the port in their connection URL — no kube-proxy NAT is involved.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trino-standalone-trino
+  namespace: analytics
+spec:
+  clusterIP: None
+  selector:
+    app: trino
+    release: trino-standalone
+    component: coordinator
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trino-standalone-trino-worker
+  namespace: analytics
+spec:
+  clusterIP: None
+  selector:
+    app: trino
+    release: trino-standalone
+    component: worker
+---
+# Public LoadBalancer for the Trino coordinator UI. The AKS cluster's
+# azurepolicy-k8sazurev1serviceallowedports only permits port 80, so we expose
+# the coordinator's HTTP port (8080) behind a service port of 80 — same trick
+# Grafana uses (k8s/helm/kube-prometheus-stack-values.yaml). External
+# IP is assigned by Azure LB; reach the UI at http://<external-ip>/ui/.
+apiVersion: v1
+kind: Service
+metadata:
+  name: trino-coordinator-ui
+  namespace: analytics
+spec:
+  type: LoadBalancer
+  selector:
+    app: trino
+    release: trino-standalone
+    component: coordinator
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP

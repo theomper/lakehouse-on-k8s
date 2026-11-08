@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flink-jobmanager
+  namespace: data-processing
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flink
+      component: jobmanager
+  template:
+    metadata:
+      labels:
+        app: flink
+        component: jobmanager
+    spec:
+      nodeSelector:
+        agentpool: systempool
+      # serviceAccountName: flink-app-sa
+      containers:
+      - name: jobmanager
+        image: acrlakehouseonk8s01.azurecr.io/flink-paimon-kafka:latest
+        imagePullPolicy: Always
+        args: ["jobmanager"]
+        env:
+          - name: AZURE_STORAGE_ACCOUNT_KEY
+            valueFrom:
+              secretKeyRef:
+                name: azure-storage-secret
+                key: storage-account-key
+          - name: ENABLE_BUILT_IN_PLUGINS
+            value: flink-azure-fs-hadoop-1.20.2.jar
+        ports:
+        - containerPort: 6123
+          name: rpc
+        - containerPort: 6124
+          name: blob-server
+        - containerPort: 8081
+          name: webui
+        - containerPort: 9249
+          name: metrics
+        livenessProbe:
+          tcpSocket:
+            port: 6123
+          initialDelaySeconds: 30
+          periodSeconds: 60
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "1"
+            memory: "2Gi"
+        volumeMounts:
+        - name: flink-config-volume
+          mountPath: /opt/flink/conf
+        securityContext:
+          runAsUser: 9999  # refers to user _flink_ from official flink image, change if necessary
+      volumes:
+      - name: flink-config-volume
+        configMap:
+          name: flink-config
+          items:
+          - key: config.yaml
+            path: config.yaml
+          - key: log4j-console.properties
+            path: log4j-console.properties

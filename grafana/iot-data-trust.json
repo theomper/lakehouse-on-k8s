@@ -1,0 +1,491 @@
+{
+  "uid": "iot-data-trust",
+  "title": "IoT Lakehouse Data Trust – SLO Tower",
+  "timezone": "browser",
+  "schemaVersion": 41,
+  "version": 1,
+  "refresh": "5m",
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
+  "tags": [
+    "iot",
+    "paimon",
+    "trino",
+    "slo",
+    "data-quality",
+    "medallion",
+    "lakehouse"
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "home_id",
+        "label": "Homes",
+        "type": "query",
+        "datasource": {
+          "type": "trino-datasource",
+          "uid": "PD73EC80E50767796"
+        },
+        "refresh": 1,
+        "hide": 0,
+        "multi": true,
+        "includeAll": true,
+        "sort": 1,
+        "query": "SELECT DISTINCT home_id FROM paimon.iot.sensor_data_10min WHERE dt >= date_format(current_date - interval '1' day, '%Y-%m-%d') ORDER BY 1",
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": true
+        }
+      },
+      {
+        "name": "slo_freshness_seconds",
+        "label": "SLO – freshness (s)",
+        "type": "custom",
+        "hide": 0,
+        "query": "30,60,120,300,600,900",
+        "current": {
+          "text": "300",
+          "value": "300",
+          "selected": true
+        },
+        "options": [
+          { "text": "30",  "value": "30",  "selected": false },
+          { "text": "60",  "value": "60",  "selected": false },
+          { "text": "120", "value": "120", "selected": false },
+          { "text": "300", "value": "300", "selected": true },
+          { "text": "600", "value": "600", "selected": false },
+          { "text": "900", "value": "900", "selected": false }
+        ]
+      },
+      {
+        "name": "slo_completeness_pct",
+        "label": "SLO – completeness (%)",
+        "type": "custom",
+        "hide": 0,
+        "query": "90,95,97,99,99.5,99.9",
+        "current": {
+          "text": "99",
+          "value": "99",
+          "selected": true
+        },
+        "options": [
+          { "text": "90",   "value": "90",   "selected": false },
+          { "text": "95",   "value": "95",   "selected": false },
+          { "text": "97",   "value": "97",   "selected": false },
+          { "text": "99",   "value": "99",   "selected": true  },
+          { "text": "99.5", "value": "99.5", "selected": false },
+          { "text": "99.9", "value": "99.9", "selected": false }
+        ]
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Freshness – seconds since latest event",
+      "description": "Wall-clock minus MAX(ts) on bronze (sensor_data_raw). Goes red when older than the SLO target.",
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT COALESCE(date_diff('second', MAX(ts), CURRENT_TIMESTAMP), 999999) AS value\nFROM paimon.iot.sensor_data_raw\nWHERE dt >= date_format(current_date - interval '1' day, '%Y-%m-%d')\n  AND ts >= CAST(CURRENT_TIMESTAMP - INTERVAL '15' MINUTE AS TIMESTAMP(3))\n  AND plug_id = 'general'\n  AND home_id IN (${home_id:sqlstring})\n"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "unit": "s",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 60 },
+              { "color": "orange", "value": 180 },
+              { "color": "red",    "value": 300 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Completeness % – critical fields (last 5 min)",
+      "description": "% of raw rows in the last 5 minutes with non-NULL voltage AND current_amp AND power_factor AND ts. Scoped to a short window to keep the SLO read cheap on a 3-worker Trino cluster.",
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT 100.0 *\n  COALESCE(SUM(CASE WHEN voltage IS NOT NULL\n                     AND current_amp IS NOT NULL\n                     AND power_factor IS NOT NULL\n                     AND ts IS NOT NULL THEN 1 ELSE 0 END), 0)\n  / NULLIF(COUNT(*), 0) AS value\nFROM paimon.iot.sensor_data_raw\nWHERE dt >= date_format(current_date - interval '1' day, '%Y-%m-%d')\n  AND ts >= CAST(CURRENT_TIMESTAMP - INTERVAL '5' MINUTE AS TIMESTAMP(3))\n  AND plug_id = 'general'\n  AND home_id IN (${home_id:sqlstring})\n"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 3,
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",    "value": null },
+              { "color": "orange", "value": 95 },
+              { "color": "yellow", "value": 99 },
+              { "color": "green",  "value": 99.5 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Voltage in-range % (10-min windows)",
+      "description": "% of 10-min general-meter windows whose avg_voltage falls within the [210, 250] V band (typical EU mains tolerance). Computed on the silver layer to keep query cost low.",
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT 100.0 *\n  COALESCE(SUM(CASE WHEN avg_voltage BETWEEN 210 AND 250 THEN 1 ELSE 0 END), 0)\n  / NULLIF(COUNT(*), 0) AS value\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND home_id IN (${home_id:sqlstring})\n  AND plug_id = 'general'\n"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",    "value": null },
+              { "color": "orange", "value": 95 },
+              { "color": "yellow", "value": 99 },
+              { "color": "green",  "value": 99.5 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Ingestion velocity (events/s, last 10-min window)",
+      "description": "Derived from SUM(samples) on the most recent 10-min silver window divided by 600s. Approximates the live event-rate without scanning bronze.",
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "WITH latest AS (\n  SELECT MAX(window_start) AS w\n  FROM paimon.iot.sensor_data_10min\n  WHERE dt >= date_format(current_date - interval '1' day, '%Y-%m-%d')\n    AND home_id IN (${home_id:sqlstring})\n)\nSELECT COALESCE(SUM(samples), 0) / 600.0 AS value\nFROM paimon.iot.sensor_data_10min, latest\nWHERE dt >= date_format(current_date - interval '1' day, '%Y-%m-%d')\n  AND window_start = latest.w\n  AND home_id IN (${home_id:sqlstring})\n"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "unit": "cps",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",    "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "yellow", "value": 100 },
+              { "color": "green",  "value": 500 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "barchart",
+      "title": "Medallion fan-out – rows by layer",
+      "description": "Bronze (raw, approximated via SUM(samples) on silver to avoid scanning the full bronze table) → Silver 10-min → Silver 30-min. Confirms aggregation pipelines populated the curated layers.",
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT '0_bronze_raw_approx' AS layer, COALESCE(SUM(samples), 0) AS rows FROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND home_id IN (${home_id:sqlstring})\nUNION ALL\nSELECT '1_silver_10min', COUNT(*) FROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND home_id IN (${home_id:sqlstring})\nUNION ALL\nSELECT '2_silver_30min', COUNT(*) FROM paimon.iot.sensor_data_30min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND home_id IN (${home_id:sqlstring})\nORDER BY layer\n"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "legend": { "showLegend": false },
+        "tooltip": { "mode": "single" },
+        "xField": "layer"
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Arrival pulse (events/min, 10-min granularity)",
+      "description": "Events-per-minute on each 10-min silver window (SUM(samples) / 10). Cheaper than a per-minute scan of bronze and still tracks throughput trends.",
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "rawSQL": "SELECT\n  window_start AS time,\n  SUM(samples) / 10.0 AS value,\n  'events_per_minute' AS metric\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND home_id IN (${home_id:sqlstring})\nGROUP BY 1\nORDER BY 1 ASC\n"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cpm",
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "pointSize": 4,
+            "showPoints": "never",
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "showLegend": true, "placement": "bottom", "displayMode": "list" },
+        "tooltip": { "mode": "single" }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Out-of-range windows per 10 min – stacked",
+      "description": "Counts of 10-min silver windows whose avg_voltage or avg_pf fall outside expected bands. Computed on the curated layer to keep the panel light on the Trino cluster.",
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 13 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "rawSQL": "WITH base AS (\n  SELECT window_start AS t, avg_voltage, avg_pf\n  FROM paimon.iot.sensor_data_10min\n  WHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                        AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n    AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n    AND home_id IN (${home_id:sqlstring})\n)\nSELECT t AS time,\n       SUM(CASE WHEN avg_voltage IS NOT NULL AND (avg_voltage < 210 OR avg_voltage > 250) THEN 1 ELSE 0 END) AS value,\n       'voltage_out_of_range' AS metric\nFROM base GROUP BY t\nUNION ALL\nSELECT t AS time,\n       SUM(CASE WHEN avg_pf IS NOT NULL AND (avg_pf < 0 OR avg_pf > 1) THEN 1 ELSE 0 END) AS value,\n       'pf_out_of_range' AS metric\nFROM base GROUP BY t\nUNION ALL\nSELECT t AS time,\n       SUM(CASE WHEN avg_voltage IS NULL OR avg_pf IS NULL THEN 1 ELSE 0 END) AS value,\n       'null_aggregate' AS metric\nFROM base GROUP BY t\nORDER BY time ASC\n"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "stacking": { "mode": "normal", "group": "A" }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "showLegend": true, "placement": "bottom", "displayMode": "table", "calcs": ["sum"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "End-to-end latency by home – staleness leaderboard (last 15 min)",
+      "description": "Per home: seconds between newest general-meter raw event and wall clock, scanned over the last 15 minutes only. Sorted laggiest first.",
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 21 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT\n  home_id,\n  date_diff('second', MAX(ts), CURRENT_TIMESTAMP) AS lag_seconds,\n  MAX(ts)                                          AS latest_event,\n  COUNT(*)                                         AS rows_in_window\nFROM paimon.iot.sensor_data_raw\nWHERE dt >= date_format(current_date - interval '1' day, '%Y-%m-%d')\n  AND ts >= CAST(CURRENT_TIMESTAMP - INTERVAL '15' MINUTE AS TIMESTAMP(3))\n  AND plug_id = 'general'\n  AND home_id IN (${home_id:sqlstring})\nGROUP BY 1\nORDER BY lag_seconds DESC\nLIMIT 25\n"
+        }
+      ],
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" } }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "lag_seconds" },
+            "properties": [
+              { "id": "unit", "value": "s" },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "color", "value": { "mode": "thresholds" } },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "green",  "value": null },
+                    { "color": "yellow", "value": 60 },
+                    { "color": "orange", "value": 180 },
+                    { "color": "red",    "value": 300 }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "rows_in_window" },
+            "properties": [{ "id": "unit", "value": "short" }]
+          }
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Aggregation freshness – minutes since last commit per layer",
+      "description": "Gap between MAX(window_end) on each curated layer and wall clock. If a layer drifts above its schedule cadence, the corresponding aggregation job is stalled.",
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 21 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT 'sensor_data_10min' AS layer,\n       MAX(window_end)                                                AS latest_window,\n       date_diff('minute', MAX(window_end), CURRENT_TIMESTAMP)        AS lag_minutes\nFROM paimon.iot.sensor_data_10min\nWHERE dt >= date_format(current_date - interval '1' day, '%Y-%m-%d')\n  AND home_id IN (${home_id:sqlstring})\nUNION ALL\nSELECT 'sensor_data_30min' AS layer,\n       MAX(window_end),\n       date_diff('minute', MAX(window_end), CURRENT_TIMESTAMP)\nFROM paimon.iot.sensor_data_30min\nWHERE dt >= date_format(current_date - interval '1' day, '%Y-%m-%d')\n  AND home_id IN (${home_id:sqlstring})\nORDER BY layer\n"
+        }
+      ],
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" } }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "lag_minutes" },
+            "properties": [
+              { "id": "unit", "value": "m" },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "color", "value": { "mode": "thresholds" } },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "green",  "value": null },
+                    { "color": "yellow", "value": 15 },
+                    { "color": "orange", "value": 60 },
+                    { "color": "red",    "value": 180 }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Schema coverage today – distinct homes & rows by layer",
+      "description": "Per layer: distinct home_id count, partitions populated and rows in window. Bronze stats are approximated via SUM(samples) on the 10-min silver to avoid scanning the bronze table.",
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 31 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT '0_bronze_raw_approx' AS layer,\n       COUNT(DISTINCT home_id)        AS distinct_homes,\n       COUNT(DISTINCT dt)             AS partitions_dt,\n       COALESCE(SUM(samples), 0)      AS rows_in_window\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND home_id IN (${home_id:sqlstring})\nUNION ALL\nSELECT '1_silver_10min',\n       COUNT(DISTINCT home_id),\n       COUNT(DISTINCT dt),\n       COUNT(*)\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND home_id IN (${home_id:sqlstring})\nUNION ALL\nSELECT '2_silver_30min',\n       COUNT(DISTINCT home_id),\n       COUNT(DISTINCT dt),\n       COUNT(*)\nFROM paimon.iot.sensor_data_30min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND home_id IN (${home_id:sqlstring})\nORDER BY layer\n"
+        }
+      ],
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": true, "reducer": ["sum"], "fields": ["rows_in_window"] } },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" } }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "distinct_homes" },
+            "properties": [{ "id": "unit", "value": "short" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "partitions_dt" },
+            "properties": [{ "id": "unit", "value": "short" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "rows_in_window" },
+            "properties": [
+              { "id": "unit", "value": "short" },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "color", "value": { "mode": "continuous-BlPu" } }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

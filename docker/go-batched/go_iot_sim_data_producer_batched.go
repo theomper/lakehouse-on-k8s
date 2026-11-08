@@ -1,0 +1,416 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"math"
+	"math/rand"
+	"os"
+	"os/signal"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"time"
+
+	"github.com/segmentio/kafka-go"
+)
+
+// --------------- SLO instrumentation ----------------------------------------
+
+var (
+	sentOK    atomic.Uint64
+	sentErr   atomic.Uint64
+	sentTotal atomic.Uint64
+)
+
+// --------------- cycle-time instrumentation ----------------------------------
+
+type cycleTracker struct {
+	mu        sync.Mutex
+	durations map[string]time.Duration
+}
+
+var cycles = &cycleTracker{durations: make(map[string]time.Duration)}
+
+func (ct *cycleTracker) record(homeID string, d time.Duration) {
+	ct.mu.Lock()
+	ct.durations[homeID] = d
+	ct.mu.Unlock()
+}
+
+func (ct *cycleTracker) snapshot() (avg, max time.Duration, count int) {
+	ct.mu.Lock()
+	defer ct.mu.Unlock()
+	if len(ct.durations) == 0 {
+		return 0, 0, 0
+	}
+	var total time.Duration
+	for _, d := range ct.durations {
+		total += d
+		if d > max {
+			max = d
+		}
+	}
+	count = len(ct.durations)
+	avg = total / time.Duration(count)
+	return
+}
+
+// --------------- env helpers ------------------------------------------------
+
+func env(name string, def *string, fallbacks ...string) string {
+	if v, ok := os.LookupEnv(name); ok {
+		return v
+	}
+	for _, fb := range fallbacks {
+		if v, ok := os.LookupEnv(fb); ok {
+			return v
+		}
+	}
+	if def == nil {
+		return ""
+	}
+	return *def
+}
+
+func envInt(name string, def int, fallbacks ...string) int {
+	v := env(name, strPtr(strconv.Itoa(def)), fallbacks...)
+	i, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return i
+}
+
+func envFloat(name string, def float64, fallbacks ...string) float64 {
+	v := env(name, strPtr(fmt.Sprintf("%g", def)), fallbacks...)
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return def
+	}
+	return f
+}
+
+func strPtr(s string) *string { return &s }
+
+// --------------- data types -------------------------------------------------
+
+type HomeVal struct {
+	HomeID      string  `json:"home_id"`
+	PlugID      *string `json:"plug_id"`
+	Voltage     float64 `json:"voltage"`
+	Current     float64 `json:"current"`
+	PowerFactor float64 `json:"power_factor"`
+	PowerW      float64 `json:"power_w"`
+	EnergyWh    float64 `json:"energy_wh"`
+	Timestamp   string  `json:"timestamp"`
+}
+
+type PlugVal struct {
+	HomeID      string  `json:"home_id"`
+	PlugID      string  `json:"plug_id"`
+	Voltage     float64 `json:"voltage"`
+	Current     float64 `json:"current"`
+	PowerFactor float64 `json:"power_factor"`
+	PowerW      float64 `json:"power_w"`
+	EnergyWh    float64 `json:"energy_wh"`
+	Timestamp   string  `json:"timestamp"`
+}
+
+func roundF(val float64, places int) float64 {
+	p := math.Pow10(places)
+	return math.Round(val*p) / p
+}
+
+// --------------- per-home simulator (batched variant) -----------------------
+
+// homeSimulator simulates one independent home site.
+// Unlike the unbatched variant, all plug messages for a single tick are
+// collected and sent in one WriteMessages call, reducing syscall overhead.
+func homeSimulator(
+	ctx context.Context,
+	homeID string,
+	plugIDs []string,
+	sleepSec float64,
+	producerStream string,
+	writerHome *kafka.Writer,
+	writerPlug *kafka.Writer,
+) {
+	rng := rand.New(rand.NewSource(time.Now().UnixNano() + int64(hashStr(homeID))))
+
+	homeEnergy := 0.0
+	plugEnergy := make(map[string]float64, len(plugIDs))
+
+	// Pre-allocate reusable buffers (avoids allocs in the hot loop)
+	raw := make([]float64, len(plugIDs))
+	plugKeyBytes := make([][]byte, len(plugIDs))
+	for i, pid := range plugIDs {
+		plugKeyBytes[i] = []byte(homeID + ":" + pid)
+	}
+	homeKeyBytes := []byte(homeID)
+
+	// Pre-allocate message batch slice for plug messages
+	plugMsgs := make([]kafka.Message, len(plugIDs))
+
+	ticker := time.NewTicker(time.Duration(sleepSec * float64(time.Second)))
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		cycleStart := time.Now()
+
+		// --- generate consistent readings ---
+		voltage := roundF(rng.NormFloat64()*2+230, 1)
+		pf := roundF(0.8+rng.Float64()*0.2, 2)
+		totalCurrent := roundF(0.2+rng.Float64()*19.8, 2)
+		totalW := voltage * totalCurrent * pf
+
+		ts := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+
+		// random weights for splitting power across plugs
+		rawSum := 0.0
+		for i := range raw {
+			raw[i] = rng.Float64()
+			rawSum += raw[i]
+		}
+		if rawSum == 0 {
+			rawSum = 1.0
+		}
+
+		// --- home record (single message) ---
+		homeEnergy += totalW * sleepSec / 3600.0
+
+		if producerStream == "both" || producerStream == "general" {
+			hv := HomeVal{
+				HomeID:      homeID,
+				PlugID:      nil,
+				Voltage:     voltage,
+				Current:     roundF(totalCurrent, 2),
+				PowerFactor: pf,
+				PowerW:      roundF(totalW, 2),
+				EnergyWh:    roundF(homeEnergy, 3),
+				Timestamp:   ts,
+			}
+			b, err := json.Marshal(hv)
+			sentTotal.Add(1)
+			if err != nil {
+				sentErr.Add(1)
+			} else if err = writerHome.WriteMessages(ctx, kafka.Message{Key: homeKeyBytes, Value: b}); err != nil {
+				sentErr.Add(1)
+			} else {
+				sentOK.Add(1)
+			}
+		}
+
+		// --- plug records — BATCHED: collect all, write once ---
+		if producerStream == "both" || producerStream == "plug" {
+			batchOK := true
+			for i, plugID := range plugIDs {
+				w := raw[i] / rawSum
+				plugW := totalW * w
+				denom := voltage * pf
+				plugCurrent := 0.0
+				if denom != 0 {
+					plugCurrent = plugW / denom
+				}
+				plugEnergy[plugID] += plugW * sleepSec / 3600.0
+
+				pv := PlugVal{
+					HomeID:      homeID,
+					PlugID:      plugID,
+					Voltage:     voltage,
+					Current:     roundF(plugCurrent, 2),
+					PowerFactor: pf,
+					PowerW:      roundF(plugW, 2),
+					EnergyWh:    roundF(plugEnergy[plugID], 3),
+					Timestamp:   ts,
+				}
+				b, err := json.Marshal(pv)
+				if err != nil {
+					batchOK = false
+					sentTotal.Add(1)
+					sentErr.Add(1)
+					continue
+				}
+				plugMsgs[i] = kafka.Message{Key: plugKeyBytes[i], Value: b}
+			}
+
+			if batchOK {
+				sentTotal.Add(uint64(len(plugIDs)))
+				if err := writerPlug.WriteMessages(ctx, plugMsgs...); err != nil {
+					sentErr.Add(uint64(len(plugIDs)))
+				} else {
+					sentOK.Add(uint64(len(plugIDs)))
+				}
+			}
+		}
+
+		// Record cycle time for this home
+		cycles.record(homeID, time.Since(cycleStart))
+	}
+}
+
+// simple string hash for seeding per-home RNGs
+func hashStr(s string) int {
+	h := 0
+	for _, c := range s {
+		h = h*31 + int(c)
+	}
+	return h
+}
+
+// --------------- main -------------------------------------------------------
+
+func main() {
+	kfkBootstrap := env("KFK_BOOTSTRAP_SERVERS", strPtr("kafka:9092"), "BOOTSTRAP")
+	kfkTopicHome := env("KFK_TOPIC_HOME", strPtr("iot-sensor-general"), "TOPIC_GENERAL", "TOPIC")
+	kfkTopicPlug := env("KFK_TOPIC_PLUG", strPtr("iot-sensor-plug"), "TOPIC_PLUG")
+	producerStream := strings.ToLower(env("PRODUCER_STREAM", strPtr("both"), "PRODUCER_MODE"))
+	simSleepSec := envFloat("SIM_SLEEP_SEC", 1.0, "SLEEP_SEC")
+
+	simHomeIDs := env("SIM_HOME_IDS", strPtr(""), "HOME_IDS")
+	simHomeCount := envInt("SIM_HOME_COUNT", 42, "HOME_COUNT")
+	simPlugsPerHome := envInt("SIM_PLUGS_PER_HOME", 8, "PLUGS_PER_HOME")
+
+	simHomeIDStart := envInt("SIM_HOME_ID_START", 0)
+	simHomeIDEnd := envInt("SIM_HOME_ID_END", 0)
+
+	// Batching config (tuneable via env)
+	batchSizeHome := envInt("BATCH_SIZE_HOME", 500)
+	batchSizePlug := envInt("BATCH_SIZE_PLUG", 1000)
+	batchTimeoutMs := envInt("BATCH_TIMEOUT_MS", 50)
+
+	if seedStr := env("SIM_RANDOM_SEED", nil, "RANDOM_SEED"); seedStr != "" {
+		if seed, err := strconv.ParseInt(seedStr, 10, 64); err == nil {
+			rand.Seed(seed)
+		}
+	}
+
+	// --- build home IDs ---
+	var baseHomeIDs []string
+	if strings.TrimSpace(simHomeIDs) != "" {
+		for _, p := range strings.Split(simHomeIDs, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				baseHomeIDs = append(baseHomeIDs, p)
+			}
+		}
+	} else if simHomeIDStart > 0 && simHomeIDEnd > 0 && simHomeIDEnd >= simHomeIDStart {
+		for i := simHomeIDStart; i <= simHomeIDEnd; i++ {
+			baseHomeIDs = append(baseHomeIDs, strconv.Itoa(i))
+		}
+	} else {
+		for i := 1; i <= simHomeCount; i++ {
+			baseHomeIDs = append(baseHomeIDs, strconv.Itoa(i))
+		}
+	}
+
+	homes := make([]string, len(baseHomeIDs))
+	for i, hid := range baseHomeIDs {
+		homes[i] = fmt.Sprintf("%s/%s", kfkTopicHome, hid)
+	}
+
+	plugsByHome := make(map[string][]string, len(homes))
+	for _, h := range homes {
+		plugs := make([]string, simPlugsPerHome)
+		for i := 1; i <= simPlugsPerHome; i++ {
+			plugs[i-1] = fmt.Sprintf("%s/%d", kfkTopicPlug, i)
+		}
+		plugsByHome[h] = plugs
+	}
+
+	// --- Kafka writers (fire-and-forget + CLIENT-SIDE BATCHING) ---
+	bootstrapServers := strings.Split(kfkBootstrap, ",")
+	for i := range bootstrapServers {
+		bootstrapServers[i] = strings.TrimSpace(bootstrapServers[i])
+	}
+
+	batchTimeout := time.Duration(batchTimeoutMs) * time.Millisecond
+
+	writerHome := &kafka.Writer{
+		Addr:                   kafka.TCP(bootstrapServers...),
+		Topic:                  kfkTopicHome,
+		Balancer:               &kafka.Hash{},
+		RequiredAcks:           kafka.RequireNone,
+		BatchSize:              batchSizeHome,
+		BatchTimeout:           batchTimeout,
+		AllowAutoTopicCreation: true,
+	}
+	writerPlug := &kafka.Writer{
+		Addr:                   kafka.TCP(bootstrapServers...),
+		Topic:                  kfkTopicPlug,
+		Balancer:               &kafka.Hash{},
+		RequiredAcks:           kafka.RequireNone,
+		BatchSize:              batchSizePlug,
+		BatchTimeout:           batchTimeout,
+		AllowAutoTopicCreation: true,
+	}
+
+	// --- launch one goroutine per home ---
+	ctx, cancel := context.WithCancel(context.Background())
+
+	var wg sync.WaitGroup
+	for _, h := range homes {
+		wg.Add(1)
+		go func(homeID string) {
+			defer wg.Done()
+			homeSimulator(ctx, homeID, plugsByHome[homeID], simSleepSec, producerStream, writerHome, writerPlug)
+		}(h)
+	}
+
+	fmt.Printf("[batched] Started %d home simulators (%d plugs each), stream=%s, interval=%.1fs\n",
+		len(homes), simPlugsPerHome, producerStream, simSleepSec)
+	fmt.Printf("[batched] BatchSize home=%d plug=%d, BatchTimeout=%s\n",
+		batchSizeHome, batchSizePlug, batchTimeout)
+
+	// --- SLO + cycle-time stats reporter ---
+	go func() {
+		t := time.NewTicker(60 * time.Second)
+		defer t.Stop()
+		last := time.Now()
+		var lastTotal uint64
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				total := sentTotal.Load()
+				dt := time.Since(last).Seconds()
+				rps := float64(total-lastTotal) / dt
+
+				avg, max, count := cycles.snapshot()
+				fmt.Printf("[stats] ok=%d err=%d total=%d rps=%.0f\n",
+					sentOK.Load(), sentErr.Load(), total, rps)
+				fmt.Printf("[cycle] homes=%d avg=%s max=%s interval=%.1fs saturated=%v\n",
+					count, avg.Round(time.Millisecond), max.Round(time.Millisecond),
+					simSleepSec, max.Seconds() > simSleepSec*0.8)
+
+				lastTotal = total
+				last = time.Now()
+			}
+		}
+	}()
+
+	// --- graceful shutdown ---
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
+	<-stop
+
+	fmt.Println("Shutting down...")
+	cancel()
+	wg.Wait()
+
+	fmt.Printf("[final] ok=%d err=%d total=%d\n",
+		sentOK.Load(), sentErr.Load(), sentTotal.Load())
+
+	_ = writerHome.Close()
+	_ = writerPlug.Close()
+}

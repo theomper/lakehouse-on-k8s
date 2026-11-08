@@ -1,0 +1,61 @@
+name: "Terraform Infrastructure Pipeline"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  terraform:
+    name: "Terraform Plan & Apply"
+    runs-on: ubuntu-latest
+
+    # Pull everything from repository variables/secrets
+    env:
+      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      LOCATION:       ${{ vars.AZURE_REGION }}
+      TFVARS_FILE:    terraform.tfvars
+
+    defaults:
+      run:
+        working-directory: infra
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Azure CLI login
+        uses: azure/login@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Ensure Resource Group exists
+        run: |
+          az group create \
+            --name "$RESOURCE_GROUP" \
+            --location "$LOCATION"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Format Check
+        run: terraform fmt -check
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        run: |
+          terraform plan -input=false \
+            -var-file=${{ env.TFVARS_FILE }} \
+            -var "vm_admin_username=${{ secrets.VM_ADMIN_USERNAME }}" \
+            -var "vm_admin_password=${{ secrets.VM_ADMIN_PASSWORD }}"
+
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main'
+        run: |
+          terraform apply -input=false -auto-approve \
+            -var-file=${{ env.TFVARS_FILE }} \
+            -var "vm_admin_username=${{ secrets.VM_ADMIN_USERNAME }}" \
+            -var "vm_admin_password=${{ secrets.VM_ADMIN_PASSWORD }}"

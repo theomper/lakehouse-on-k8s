@@ -1,0 +1,9 @@
+﻿{
+    "avg_cycle_s":  0.076,
+    "err_delta":  0,
+    "error_rate":  0,
+    "max_cycle_s":  0.104,
+    "ok_delta":  37784125,
+    "saturated":  "FALSE",
+    "observed_rps":  17527
+}

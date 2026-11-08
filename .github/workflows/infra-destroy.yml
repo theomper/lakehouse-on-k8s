@@ -1,0 +1,28 @@
+# .github/workflows/infra-destroy.yml
+name: Destroy Infrastructure
+
+on:
+  workflow_dispatch:
+
+env:
+  RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+
+jobs:
+  destroy:
+    name: "Resource Group Delete"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Azure CLI login
+        uses: azure/login@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Delete Resource Group
+        run: |
+          echo "Deleting resource group: $RESOURCE_GROUP"
+          az group delete --name "$RESOURCE_GROUP" --yes --no-wait
+
+      - name: Azure CLI logout
+        if: always()
+        run: az logout

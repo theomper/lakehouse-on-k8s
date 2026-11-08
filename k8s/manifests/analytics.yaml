@@ -1,0 +1,144 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: analytics
+---
+# # Persistent storage for Grafana dashboards and plugins
+# apiVersion: v1
+# kind: PersistentVolumeClaim
+# metadata:
+#   name: grafana-storage
+#   namespace: analytics
+# spec:
+#   accessModes:
+#     - ReadWriteOnce
+#   resources:
+#     requests:
+#       storage: 5Gi
+# ---
+# # Provision a Grafana data source that points to the Trino Helm release
+# # We assume you install Trino with:  helm upgrade --install trino-standalone trino/trino -n analytics ...
+# apiVersion: v1
+# kind: ConfigMap
+# metadata:
+#   name: grafana-datasource-trino
+#   namespace: analytics
+# data:
+#   trino-datasource.yaml: |
+#     apiVersion: 1
+#     datasources:
+#       - name: Trino
+#         uid: PD73EC80E50767796
+#         type: trino-datasource
+#         access: proxy
+#         url: http://trino-standalone-trino.analytics.svc.cluster.local:8080
+#         orgId: 1
+#         isDefault: true
+#         editable: false
+#         jsonData:
+#           catalog: paimon
+#           schema: iot
+# ---
+# # Dashboard provider: tells Grafana to load dashboards from /etc/grafana/dashboards
+# apiVersion: v1
+# kind: ConfigMap
+# metadata:
+#   name: grafana-dashboard-provider
+#   namespace: analytics
+# data:
+#   dashboards.yaml: |
+#     apiVersion: 1
+#     providers:
+#       - name: "iot-dashboards"
+#         orgId: 1
+#         folder: "IoT"
+#         type: file
+#         disableDeletion: true
+#         updateIntervalSeconds: 10
+#         allowUiUpdates: false
+#         options:
+#           path: /etc/grafana/dashboards
+#           foldersFromFilesStructure: false
+# ---
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: grafana
+#   namespace: analytics
+# spec:
+#   replicas: 1
+#   selector:
+#     matchLabels:
+#       app: grafana
+#   template:
+#     metadata:
+#       labels:
+#         app: grafana
+#     spec:
+#       securityContext:
+#         runAsUser: 472
+#         runAsGroup: 472
+#         fsGroup: 472
+#         fsGroupChangePolicy: Always   # optional but nice on CSI volumes
+#       containers:
+#         - name: grafana
+#           image: grafana/grafana-oss:11.2.0
+#           imagePullPolicy: IfNotPresent
+#           ports:
+#             - containerPort: 3000
+#               name: http
+#           env:
+#             # Simple lab admin; change for anything beyond demos
+#             - name: GF_SECURITY_ADMIN_USER
+#               value: admin
+#             - name: GF_SECURITY_ADMIN_PASSWORD
+#               value: admin
+#             # Install the official Trino data source plugin
+#             - name: GF_INSTALL_PLUGINS
+#               value: "trino-datasource"
+#             # Usually not needed for official plugins, but harmless if left
+#             - name: GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS
+#               value: "trino-datasource"
+#           volumeMounts:
+#             - name: grafana-storage
+#               mountPath: /var/lib/grafana
+#             - name: grafana-datasource-trino
+#               mountPath: /etc/grafana/provisioning/datasources/trino-datasource.yaml
+#               subPath: trino-datasource.yaml
+#             - name: grafana-dashboard-provider
+#               mountPath: /etc/grafana/provisioning/dashboards
+#               readOnly: true
+#             - name: grafana-dashboards
+#               mountPath: /etc/grafana/dashboards
+#               readOnly: true
+#       volumes:
+#         - name: grafana-storage
+#           persistentVolumeClaim:
+#             claimName: grafana-storage
+#         - name: grafana-datasource-trino
+#           configMap:
+#             name: grafana-datasource-trino
+#         - name: grafana-dashboard-provider
+#           configMap:
+#             name: grafana-dashboard-provider
+#         - name: grafana-dashboards
+#           projected:
+#             sources:
+#               - configMap:
+#                   name: grafana-dashboard-iot-live-raw
+#               - configMap:
+#                   name: grafana-dashboard-iot-energy-kpis
+# ---
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: grafana
+#   namespace: analytics
+# spec:
+#   selector:
+#     app: grafana
+#   type: LoadBalancer
+#   ports:
+#     - name: http
+#       port: 3000       # external port on the Azure Load Balancer
+#       targetPort: http # maps to containerPort 3000

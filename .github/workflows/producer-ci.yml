@@ -1,0 +1,53 @@
+# .github/workflows/producer-ci.yml
+
+name: Build & Push IoT Simulated Data Producer
+
+on:
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: iot_sim_data_producer
+  GO_IMAGE_NAME: go_iot_sim_data_producer
+  GO_BATCHED_IMAGE_NAME: go_iot_sim_data_producer_batched
+  ACR_LOGIN_SERVER: acrlakehouseonk8s01.azurecr.io
+
+jobs:
+  build:
+    name: "Build & Deploy IoT Simulated Data Producer"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Azure CLI login
+        uses: azure/login@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Docker login to ACR
+        run: az acr login --name ${{ env.ACR_LOGIN_SERVER }}
+
+      - name: Build & push (Python producer)
+        run: |
+          IMAGE=${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
+          docker build --pull --no-cache \
+            -t "$IMAGE" \
+            -f docker/iot-sim-producer.Dockerfile .
+          docker push "$IMAGE"
+
+      - name: Build & push (Go producer)
+        run: |
+          IMAGE=${{ env.ACR_LOGIN_SERVER }}/${{ env.GO_IMAGE_NAME }}:latest
+          docker build --pull --no-cache \
+            -t "$IMAGE" \
+            -f docker/go-iot-sim-producer.Dockerfile .
+          docker push "$IMAGE"
+
+      - name: Build & push (Go batched producer)
+        run: |
+          IMAGE=${{ env.ACR_LOGIN_SERVER }}/${{ env.GO_BATCHED_IMAGE_NAME }}:latest
+          docker build --pull --no-cache \
+            -t "$IMAGE" \
+            -f docker/go-iot-sim-producer-batched.Dockerfile .
+          docker push "$IMAGE"

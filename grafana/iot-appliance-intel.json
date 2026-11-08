@@ -1,0 +1,554 @@
+{
+  "uid": "iot-appliance-intel",
+  "title": "IoT Appliance Intelligence – Behavior & Waste",
+  "timezone": "browser",
+  "schemaVersion": 41,
+  "version": 1,
+  "refresh": "5m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "tags": [
+    "iot",
+    "paimon",
+    "trino",
+    "appliance",
+    "behavior",
+    "lakehouse"
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "home_id",
+        "label": "Homes",
+        "type": "query",
+        "datasource": {
+          "type": "trino-datasource",
+          "uid": "PD73EC80E50767796"
+        },
+        "refresh": 1,
+        "hide": 0,
+        "multi": true,
+        "includeAll": true,
+        "sort": 1,
+        "query": "SELECT DISTINCT home_id FROM paimon.iot.sensor_data_10min WHERE dt >= date_format(current_date - interval '1' day, '%Y-%m-%d') ORDER BY 1",
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": true
+        }
+      },
+      {
+        "name": "plug_id",
+        "label": "Plugs (non-general)",
+        "type": "query",
+        "datasource": {
+          "type": "trino-datasource",
+          "uid": "PD73EC80E50767796"
+        },
+        "refresh": 2,
+        "hide": 0,
+        "multi": true,
+        "includeAll": true,
+        "sort": 1,
+        "query": "SELECT DISTINCT plug_id FROM paimon.iot.sensor_data_10min WHERE dt >= date_format(current_date - interval '1' day, '%Y-%m-%d') AND plug_id <> 'general' AND home_id IN (${home_id:sqlstring}) ORDER BY 1",
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": true
+        }
+      },
+      {
+        "name": "tariff_eur_per_kwh",
+        "label": "Tariff (€/kWh)",
+        "type": "custom",
+        "hide": 0,
+        "query": "0.10,0.15,0.20,0.25,0.30,0.35,0.40",
+        "current": {
+          "text": "0.25",
+          "value": "0.25",
+          "selected": true
+        },
+        "options": [
+          { "text": "0.10", "value": "0.10", "selected": false },
+          { "text": "0.15", "value": "0.15", "selected": false },
+          { "text": "0.20", "value": "0.20", "selected": false },
+          { "text": "0.25", "value": "0.25", "selected": true },
+          { "text": "0.30", "value": "0.30", "selected": false },
+          { "text": "0.35", "value": "0.35", "selected": false },
+          { "text": "0.40", "value": "0.40", "selected": false }
+        ]
+      },
+      {
+        "name": "co2_kg_per_kwh",
+        "label": "CO₂ (kg/kWh)",
+        "type": "custom",
+        "hide": 0,
+        "query": "0.10,0.20,0.30,0.40,0.50",
+        "current": {
+          "text": "0.30",
+          "value": "0.30",
+          "selected": true
+        },
+        "options": [
+          { "text": "0.10", "value": "0.10", "selected": false },
+          { "text": "0.20", "value": "0.20", "selected": false },
+          { "text": "0.30", "value": "0.30", "selected": true },
+          { "text": "0.40", "value": "0.40", "selected": false },
+          { "text": "0.50", "value": "0.50", "selected": false }
+        ]
+      },
+      {
+        "name": "standby_watts",
+        "label": "Standby threshold (W)",
+        "type": "custom",
+        "hide": 0,
+        "query": "1,3,5,10,20",
+        "current": {
+          "text": "5",
+          "value": "5",
+          "selected": true
+        },
+        "options": [
+          { "text": "1", "value": "1", "selected": false },
+          { "text": "3", "value": "3", "selected": false },
+          { "text": "5", "value": "5", "selected": true },
+          { "text": "10", "value": "10", "selected": false },
+          { "text": "20", "value": "20", "selected": false }
+        ]
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Plug Energy (kWh)",
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT COALESCE(SUM(energy_kwh), 0) AS value\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND plug_id <> 'general'\n  AND home_id IN (${home_id:sqlstring})\n  AND plug_id IN (${plug_id:sqlstring})\n"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "unit": "kwh",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Estimated Cost (€)",
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT COALESCE(SUM(energy_kwh), 0) * ${tariff_eur_per_kwh} AS value\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND plug_id <> 'general'\n  AND home_id IN (${home_id:sqlstring})\n  AND plug_id IN (${plug_id:sqlstring})\n"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "unit": "currencyEUR",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "orange", "value": 25 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "CO₂ Footprint (kg)",
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT COALESCE(SUM(energy_kwh), 0) * ${co2_kg_per_kwh} AS value\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND plug_id <> 'general'\n  AND home_id IN (${home_id:sqlstring})\n  AND plug_id IN (${plug_id:sqlstring})\n"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "unit": "kg",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "orange", "value": 25 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Standby Waste (€ in window)",
+      "description": "Energy spent by plugs whose hourly real power was below the standby threshold but never zero — i.e. devices left plugged in. Multiplied by the active tariff.",
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "WITH hourly AS (\n  SELECT\n    home_id,\n    plug_id,\n    energy_kwh,\n    avg_voltage * avg_current * avg_pf AS avg_w\n  FROM paimon.iot.sensor_data_10min\n  WHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                        AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n    AND plug_id <> 'general'\n    AND home_id IN (${home_id:sqlstring})\n    AND plug_id IN (${plug_id:sqlstring})\n)\nSELECT COALESCE(SUM(CASE WHEN avg_w > 0 AND avg_w < ${standby_watts} THEN energy_kwh ELSE 0 END), 0) * ${tariff_eur_per_kwh} AS value\nFROM hourly\n"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "unit": "currencyEUR",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "orange", "value": 2 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "piechart",
+      "title": "Energy Share by Appliance",
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT\n  plug_id AS metric,\n  SUM(energy_kwh) AS value\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND plug_id <> 'general'\n  AND home_id IN (${home_id:sqlstring})\n  AND plug_id IN (${plug_id:sqlstring})\nGROUP BY 1\nORDER BY value DESC\n"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwh",
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "values": ["value", "percent"]
+        },
+        "pieType": "donut",
+        "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false },
+        "tooltip": { "mode": "single", "sort": "desc" }
+      }
+    },
+    {
+      "id": 6,
+      "type": "barchart",
+      "title": "Time-of-Use Pattern (kWh)",
+      "description": "Off-peak: 23:00-07:00 · Mid: 07:00-17:00 + 22:00-23:00 · Peak: 17:00-22:00",
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT\n  CASE\n    WHEN hour(window_start) >= 17 AND hour(window_start) < 22 THEN '2_peak'\n    WHEN hour(window_start) >= 23 OR  hour(window_start) < 7  THEN '0_off_peak'\n    ELSE '1_mid'\n  END AS band,\n  SUM(energy_kwh) AS energy_kwh\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND plug_id <> 'general'\n  AND home_id IN (${home_id:sqlstring})\n  AND plug_id IN (${plug_id:sqlstring})\nGROUP BY 1\nORDER BY 1\n"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwh",
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "stacking": "none",
+        "legend": { "showLegend": false },
+        "tooltip": { "mode": "single" },
+        "xField": "band"
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Energy by Appliance over time (kWh / hour)",
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 13 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "rawSQL": "SELECT\n  window_start AS time,\n  SUM(energy_kwh) AS value,\n  plug_id AS metric\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND plug_id <> 'general'\n  AND home_id IN (${home_id:sqlstring})\n  AND plug_id IN (${plug_id:sqlstring})\nGROUP BY 1, 3\nORDER BY 1 ASC\n"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwh",
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "stacking": { "mode": "normal", "group": "A" }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "showLegend": true, "placement": "bottom", "displayMode": "table", "calcs": ["sum"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Hour-of-Day × Plug – Avg Real Power (W)",
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 22 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT\n  plug_id,\n  hour(window_start) AS hour_of_day,\n  AVG(avg_voltage * avg_current * avg_pf) AS avg_w\nFROM paimon.iot.sensor_data_10min\nWHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                      AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n  AND plug_id <> 'general'\n  AND home_id IN (${home_id:sqlstring})\n  AND plug_id IN (${plug_id:sqlstring})\nGROUP BY 1, 2\nORDER BY 1, 2\n"
+        }
+      ],
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "cellOptions": { "type": "color-background", "mode": "gradient" } },
+          "color": { "mode": "continuous-GrYlRd" },
+          "decimals": 1,
+          "unit": "watt"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "plug_id" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "auto" } },
+              { "id": "color", "value": { "mode": "thresholds" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "hour_of_day" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "auto" } },
+              { "id": "color", "value": { "mode": "thresholds" } },
+              { "id": "unit", "value": "none" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "type": "barchart",
+      "title": "Always-On Score – % of hours above standby threshold",
+      "description": "100% means the appliance was drawing more than the standby threshold during every hour in the window. Low scores indicate occasional / low-duty appliances.",
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 22 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "WITH hourly AS (\n  SELECT\n    home_id,\n    plug_id,\n    avg_voltage * avg_current * avg_pf AS avg_w\n  FROM paimon.iot.sensor_data_10min\n  WHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                        AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n    AND plug_id <> 'general'\n    AND home_id IN (${home_id:sqlstring})\n    AND plug_id IN (${plug_id:sqlstring})\n)\nSELECT\n  CONCAT(home_id, '/', plug_id) AS device,\n  100.0 * SUM(CASE WHEN avg_w >= ${standby_watts} THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS active_pct\nFROM hourly\nGROUP BY 1\nORDER BY active_pct DESC\nLIMIT 20\n"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "continuous-GrYlRd" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "legend": { "showLegend": false },
+        "tooltip": { "mode": "single" },
+        "xField": "device"
+      }
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Phantom Load Suspects – standby waste leaderboard",
+      "description": "Plugs whose hourly real power stayed above zero but below the standby threshold. Sorted by estimated wasted euros.",
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 32 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "WITH hourly AS (\n  SELECT\n    home_id,\n    plug_id,\n    energy_kwh,\n    avg_voltage * avg_current * avg_pf AS avg_w\n  FROM paimon.iot.sensor_data_10min\n  WHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                        AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n    AND plug_id <> 'general'\n    AND home_id IN (${home_id:sqlstring})\n    AND plug_id IN (${plug_id:sqlstring})\n)\nSELECT\n  home_id,\n  plug_id,\n  ROUND(AVG(CASE WHEN avg_w > 0 AND avg_w < ${standby_watts} THEN avg_w END), 2) AS standby_avg_w,\n  SUM(CASE WHEN avg_w > 0 AND avg_w < ${standby_watts} THEN 1 ELSE 0 END) AS standby_hours,\n  ROUND(SUM(CASE WHEN avg_w > 0 AND avg_w < ${standby_watts} THEN energy_kwh ELSE 0 END), 3) AS wasted_kwh,\n  ROUND(SUM(CASE WHEN avg_w > 0 AND avg_w < ${standby_watts} THEN energy_kwh ELSE 0 END) * ${tariff_eur_per_kwh}, 2) AS wasted_eur\nFROM hourly\nGROUP BY 1, 2\nHAVING SUM(CASE WHEN avg_w > 0 AND avg_w < ${standby_watts} THEN 1 ELSE 0 END) > 0\nORDER BY wasted_eur DESC\nLIMIT 25\n"
+        }
+      ],
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": true, "reducer": ["sum"], "fields": ["wasted_kwh", "wasted_eur", "standby_hours"] } },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" } }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "wasted_eur" },
+            "properties": [
+              { "id": "unit", "value": "currencyEUR" },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "color", "value": { "mode": "continuous-YlRd" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "wasted_kwh" },
+            "properties": [{ "id": "unit", "value": "kwh" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "standby_avg_w" },
+            "properties": [{ "id": "unit", "value": "watt" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "standby_hours" },
+            "properties": [{ "id": "unit", "value": "h" }]
+          }
+        ]
+      }
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Burstiness – peak/avg ratio anomalies",
+      "description": "Per appliance: hourly peak power vs average real power. Ratio > 3 suggests highly bursty load (e.g. resistive heating, motors). Useful for sizing and demand-response targeting.",
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 32 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "WITH hourly AS (\n  SELECT\n    home_id,\n    plug_id,\n    avg_voltage * avg_current * avg_pf AS avg_w,\n    peak_power_w\n  FROM paimon.iot.sensor_data_10min\n  WHERE window_start BETWEEN CAST(from_unixtime(${__from:date:seconds}) AS timestamp(3))\n                        AND CAST(from_unixtime(${__to:date:seconds})   AS timestamp(3))\n  AND dt BETWEEN date_format(from_unixtime(${__from:date:seconds}), '%Y-%m-%d') AND date_format(from_unixtime(${__to:date:seconds}), '%Y-%m-%d')\n    AND plug_id <> 'general'\n    AND home_id IN (${home_id:sqlstring})\n    AND plug_id IN (${plug_id:sqlstring})\n)\nSELECT\n  home_id,\n  plug_id,\n  ROUND(AVG(avg_w), 2)                                          AS avg_w,\n  ROUND(MAX(peak_power_w), 2)                                   AS peak_w,\n  ROUND(MAX(peak_power_w) / NULLIF(AVG(avg_w), 0), 2)           AS peak_to_avg_ratio\nFROM hourly\nGROUP BY 1, 2\nHAVING AVG(avg_w) > 0\nORDER BY peak_to_avg_ratio DESC\nLIMIT 25\n"
+        }
+      ],
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" } }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "avg_w" },
+            "properties": [{ "id": "unit", "value": "watt" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "peak_w" },
+            "properties": [{ "id": "unit", "value": "watt" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "peak_to_avg_ratio" },
+            "properties": [
+              { "id": "unit", "value": "none" },
+              { "id": "decimals", "value": 2 },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "color", "value": { "mode": "thresholds" } },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "green", "value": null },
+                    { "color": "yellow", "value": 2 },
+                    { "color": "orange", "value": 3 },
+                    { "color": "red", "value": 5 }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

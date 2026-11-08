@@ -1,0 +1,140 @@
+﻿apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-batched-iot-sim-7500h-pod0
+  namespace: data-ingest
+  labels:
+    app: go-iot-sim-producer-batched
+    component: simulator
+    experiment: "7500h"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: go-iot-sim-producer-batched
+      experiment: "7500h"
+      pod-index: "0"
+  template:
+    metadata:
+      labels:
+        app: go-iot-sim-producer-batched
+        component: simulator
+        experiment: "7500h"
+        pod-index: "0"
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: producer
+        image: acrlakehouseonk8s01.azurecr.io/go_iot_sim_data_producer_batched:latest
+        imagePullPolicy: IfNotPresent
+        env:
+          - name: KFK_BOOTSTRAP_SERVERS
+            value: "kafka-0.kafka-svc.data-ingest.svc.cluster.local:9092,kafka-1.kafka-svc.data-ingest.svc.cluster.local:9092"
+          - { name: PRODUCER_STREAM,     value: "both" }
+          - { name: KFK_TOPIC_HOME,      value: "iot-sensor-general" }
+          - { name: KFK_TOPIC_PLUG,      value: "iot-sensor-plug" }
+          - { name: SIM_HOME_ID_START,   value: "1" }
+          - { name: SIM_HOME_ID_END,     value: "3500" }
+          - { name: SIM_PLUGS_PER_HOME,  value: "4" }
+          - { name: SIM_SLEEP_SEC,       value: "1.0" }
+          # Batching knobs
+          - { name: BATCH_SIZE_HOME,     value: "500" }
+          - { name: BATCH_SIZE_PLUG,     value: "1000" }
+          - { name: BATCH_TIMEOUT_MS,    value: "50" }
+        resources:
+          requests: { cpu: "500m", memory: "256Mi" }
+          limits:   { cpu: "2", memory: "1Gi" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-batched-iot-sim-7500h-pod1
+  namespace: data-ingest
+  labels:
+    app: go-iot-sim-producer-batched
+    component: simulator
+    experiment: "7500h"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: go-iot-sim-producer-batched
+      experiment: "7500h"
+      pod-index: "1"
+  template:
+    metadata:
+      labels:
+        app: go-iot-sim-producer-batched
+        component: simulator
+        experiment: "7500h"
+        pod-index: "1"
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: producer
+        image: acrlakehouseonk8s01.azurecr.io/go_iot_sim_data_producer_batched:latest
+        imagePullPolicy: IfNotPresent
+        env:
+          - name: KFK_BOOTSTRAP_SERVERS
+            value: "kafka-0.kafka-svc.data-ingest.svc.cluster.local:9092,kafka-1.kafka-svc.data-ingest.svc.cluster.local:9092"
+          - { name: PRODUCER_STREAM,     value: "both" }
+          - { name: KFK_TOPIC_HOME,      value: "iot-sensor-general" }
+          - { name: KFK_TOPIC_PLUG,      value: "iot-sensor-plug" }
+          - { name: SIM_HOME_ID_START,   value: "3501" }
+          - { name: SIM_HOME_ID_END,     value: "7000" }
+          - { name: SIM_PLUGS_PER_HOME,  value: "4" }
+          - { name: SIM_SLEEP_SEC,       value: "1.0" }
+          # Batching knobs
+          - { name: BATCH_SIZE_HOME,     value: "500" }
+          - { name: BATCH_SIZE_PLUG,     value: "1000" }
+          - { name: BATCH_TIMEOUT_MS,    value: "50" }
+        resources:
+          requests: { cpu: "500m", memory: "256Mi" }
+          limits:   { cpu: "2", memory: "1Gi" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-batched-iot-sim-7500h-pod2
+  namespace: data-ingest
+  labels:
+    app: go-iot-sim-producer-batched
+    component: simulator
+    experiment: "7500h"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: go-iot-sim-producer-batched
+      experiment: "7500h"
+      pod-index: "2"
+  template:
+    metadata:
+      labels:
+        app: go-iot-sim-producer-batched
+        component: simulator
+        experiment: "7500h"
+        pod-index: "2"
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: producer
+        image: acrlakehouseonk8s01.azurecr.io/go_iot_sim_data_producer_batched:latest
+        imagePullPolicy: IfNotPresent
+        env:
+          - name: KFK_BOOTSTRAP_SERVERS
+            value: "kafka-0.kafka-svc.data-ingest.svc.cluster.local:9092,kafka-1.kafka-svc.data-ingest.svc.cluster.local:9092"
+          - { name: PRODUCER_STREAM,     value: "both" }
+          - { name: KFK_TOPIC_HOME,      value: "iot-sensor-general" }
+          - { name: KFK_TOPIC_PLUG,      value: "iot-sensor-plug" }
+          - { name: SIM_HOME_ID_START,   value: "7001" }
+          - { name: SIM_HOME_ID_END,     value: "7500" }
+          - { name: SIM_PLUGS_PER_HOME,  value: "4" }
+          - { name: SIM_SLEEP_SEC,       value: "1.0" }
+          # Batching knobs
+          - { name: BATCH_SIZE_HOME,     value: "500" }
+          - { name: BATCH_SIZE_PLUG,     value: "1000" }
+          - { name: BATCH_TIMEOUT_MS,    value: "50" }
+        resources:
+          requests: { cpu: "500m", memory: "256Mi" }
+          limits:   { cpu: "2", memory: "1Gi" }

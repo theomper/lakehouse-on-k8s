@@ -1,0 +1,9 @@
+﻿{
+    "e2e_latency_ms":  61.8,
+    "server_latency_ms":  49.8,
+    "used_capacity_gib":  13.854,
+    "ingress_gib":  6.752,
+    "availability_pct":  100.0,
+    "egress_gib":  8.860,
+    "transactions":  15536
+}

@@ -1,0 +1,79 @@
+# k8s/helm/trino-values.yaml
+image:
+  repository: acrlakehouseonk8s01.azurecr.io/trino-paimon
+  tag: "latest"
+  pullPolicy: Always
+
+server:
+  jvm:
+    maxHeapSize: "2G"
+    gcMethod:
+      type: "G1"
+      g1:
+        heapRegionSize: "32M"
+  workers: 6
+  node:
+    environment: analytics
+
+# Services are managed separately in trino-services.yaml as headless (clusterIP: None,
+# no ports) to bypass azurepolicy-k8sazurev1serviceallowedports. Do not add a
+# service: block here; see apps-ci.ps1 for how the chart is deployed.
+
+# Env var pulled from secret (must exist in namespace analytics)
+env:
+  - name: AZURE_STORAGE_ACCOUNT_KEY
+    valueFrom:
+      secretKeyRef:
+        name: azure-storage-secret
+        key: storage-account-key
+
+# IMPORTANT when you want Trino to run queries even with minimal workers
+# (optional but useful for small clusters)
+coordinator:
+  nodeSelector:
+    agentpool: userpool
+  config:
+    nodeScheduler:
+      includeCoordinator: true
+
+  additionalJVMConfig:
+    - --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
+    - --add-opens=java.base/java.nio=ALL-UNNAMED
+
+worker:
+  nodeSelector:
+    agentpool: userpool
+  additionalJVMConfig:
+    - --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
+    - --add-opens=java.base/java.nio=ALL-UNNAMED
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app.kubernetes.io/component
+                  operator: In
+                  values: [worker]
+            topologyKey: kubernetes.io/hostname
+
+catalogs:
+  tpch: null
+  tpcds: null
+  paimon: |-
+    connector.name=paimon
+
+    # Must match the warehouse path used by Flink/Paimon
+    warehouse=abfs://warehouse@stlakehouseonk8s01.dfs.core.windows.net/paimon
+
+    # Use Trino native ADLS Gen2 filesystem
+    fs.native-azure.enabled=true
+    fs.hadoop.enabled=false
+
+    # Auth via Storage Account key
+    azure.auth-type=ACCESS_KEY
+    azure.access-key=${ENV:AZURE_STORAGE_ACCOUNT_KEY}
+
+# additionalCatalogs: {}
+# End of k8s/helm/trino-values.yaml

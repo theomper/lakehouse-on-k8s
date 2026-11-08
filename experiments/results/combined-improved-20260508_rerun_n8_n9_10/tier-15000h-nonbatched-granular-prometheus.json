@@ -1,0 +1,57 @@
+﻿{
+    "trino_cpu":  {
+                      "trino-standalone-trino-coordinator-cfb5cfb67-5kftq":  0.4147445718299258,
+                      "trino-standalone-trino-worker-7b987694dc-qpzh2":  0.36673987557881554,
+                      "trino-standalone-trino-worker-7b987694dc-65ms9":  0.36269726587798778
+                  },
+    "trino_mem":  {
+                      "trino-standalone-trino-coordinator-cfb5cfb67-5kftq":  7616084613.2602739,
+                      "trino-standalone-trino-worker-7b987694dc-qpzh2":  5164041089.7534246,
+                      "trino-standalone-trino-worker-7b987694dc-65ms9":  8970292883.287672
+                  },
+    "flink_fs":  {
+                     "flink-jobmanager-546d55bf4f-qsq25":  439310.0273972603,
+                     "flink-taskmanager-86c48bb565-74fp7":  1381838.9041095891,
+                     "flink-taskmanager-86c48bb565-w6fpd":  180448.43835616438
+                 },
+    "flink_netrx":  {
+                        "flink-jobmanager-546d55bf4f-qsq25":  7657.0443051529819,
+                        "flink-taskmanager-86c48bb565-74fp7":  23444623.119182713,
+                        "flink-taskmanager-86c48bb565-w6fpd":  1367236.4045728776
+                    },
+    "kafka_pvc":  {
+                      "kafka-storage-kafka-0":  56578571783.0137,
+                      "kafka-storage-kafka-1":  56495637321.643837
+                  },
+    "kafka_cpu":  {
+                      "kafka-0":  1.3147069882635487,
+                      "kafka-1":  1.3018562843830062
+                  },
+    "flink_mem":  {
+                      "flink-jobmanager-546d55bf4f-qsq25":  872666715.17808223,
+                      "flink-taskmanager-86c48bb565-74fp7":  4643037632.8767128,
+                      "flink-taskmanager-86c48bb565-w6fpd":  4147642844.9315066
+                  },
+    "flink_cpu":  {
+                      "flink-jobmanager-546d55bf4f-qsq25":  0.015593075608252821,
+                      "flink-taskmanager-86c48bb565-74fp7":  3.256133412186959,
+                      "flink-taskmanager-86c48bb565-w6fpd":  0.87621586517930417
+                  },
+    "flink_nettx":  {
+                        "flink-jobmanager-546d55bf4f-qsq25":  6532.9951581233836,
+                        "flink-taskmanager-86c48bb565-74fp7":  5293138.8485446516,
+                        "flink-taskmanager-86c48bb565-w6fpd":  15609.403450985215
+                    },
+    "kafka_mem":  {
+                      "kafka-0":  22684109838.027397,
+                      "kafka-1":  22762126714.739727
+                  },
+    "kafka_nettx":  {
+                        "kafka-0":  19389626.316641405,
+                        "kafka-1":  19372699.513425935
+                    },
+    "kafka_netrx":  {
+                        "kafka-0":  21736619.868155617,
+                        "kafka-1":  21705950.89056401
+                    }
+}

@@ -1,0 +1,113 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: data-ingest
+---
+# Headless Service for Kafka StatefulSet pod DNS (kafka-0.kafka-svc..., kafka-1.kafka-svc...).
+# No ports declared: azurepolicy-k8sazurev1serviceallowedports only fires on spec.ports
+# entries, so an empty ports section bypasses the restriction.
+# Kafka clients connect via bootstrap server URLs where the port is explicit
+# (e.g. kafka-0.kafka-svc.data-ingest.svc.cluster.local:9092), not via kube-proxy.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-svc
+  namespace: data-ingest
+  labels:
+    app: kafka
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: kafka
+---
+### Source: https://medium.com/@martin.hodges/deploying-kafka-on-a-kind-kubernetes-cluster-for-development-and-testing-purposes-ed7ademed03cb
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: data-ingest
+  labels: { app: kafka }
+spec:
+  serviceName: kafka-svc
+  replicas: 2
+  selector: { matchLabels: { app: kafka } }
+  template:
+    metadata:
+      labels: { app: kafka }
+    spec:
+      nodeSelector:
+        agentpool: userpool
+      containers:
+      - name: kafka-container
+        image: doughgle/kafka-kraft:latest
+        ports:
+          - containerPort: 9092
+          - containerPort: 9093
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+        env:
+          - { name: REPLICAS, value: "2" }
+          - { name: SERVICE, value: "kafka-svc" }
+          - { name: NAMESPACE, value: "data-ingest" }
+          - { name: SHARE_DIR, value: "/var/run/kafka-data" }
+          - { name: CLUSTER_ID, value: "LRx92c9yQKws786HYosuBn" }
+          - { name: DEFAULT_REPLICATION_FACTOR, value: "2" }
+          - { name: DEFAULT_MIN_INSYNC_REPLICAS, value: "1" }
+        readinessProbe:
+          tcpSocket:
+            port: 9092
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 12
+        volumeMounts:
+          - name: kafka-storage
+            mountPath: /var/run/kafka-data
+  volumeClaimTemplates:
+    - metadata: { name: kafka-storage }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: managed-csi
+        resources:
+          requests: { storage: 128Gi }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-init-topics
+  namespace: data-ingest
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      nodeSelector:
+        agentpool: userpool
+      containers:
+      - name: create-topics
+        image: doughgle/kafka-kraft:latest
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash","-lc"]
+        args:
+        - |
+          set -euo pipefail
+          BOOT="kafka-0.kafka-svc.data-ingest.svc.cluster.local:9092,kafka-1.kafka-svc.data-ingest.svc.cluster.local:9092"
+
+          echo "Waiting for broker API..."
+          for i in {1..90}; do
+            /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server "$BOOT" && break || sleep 2
+          done
+
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BOOT" --create --if-not-exists \
+            --topic iot-sensor-general --replication-factor 2 --partitions 4
+
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BOOT" --create --if-not-exists \
+            --topic iot-sensor-plug --replication-factor 2 --partitions 8
+
+          echo "Describe topics:"
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BOOT" --describe --topic iot-sensor-general
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BOOT" --describe --topic iot-sensor-plug

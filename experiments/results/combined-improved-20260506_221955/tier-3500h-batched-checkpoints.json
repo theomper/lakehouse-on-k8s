@@ -1,0 +1,23 @@
+﻿{
+    "phase":  "batched",
+    "job_id_changed":  false,
+    "t1":  {
+               "restored":  0,
+               "completed":  45,
+               "job_id":  "115596d6425d0a5291dce004877bb69a",
+               "job_id_changed":  false,
+               "failed":  0
+           },
+    "t0":  {
+               "restored":  0,
+               "completed":  7,
+               "job_id":  "115596d6425d0a5291dce004877bb69a",
+               "job_id_changed":  false,
+               "failed":  0
+           },
+    "delta":  {
+                  "completed":  38,
+                  "restored":  0,
+                  "failed":  0
+              }
+}

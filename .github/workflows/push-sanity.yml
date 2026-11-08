@@ -1,0 +1,64 @@
+name: Main Push Sanity Checks
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  terraform-check:
+    name: Terraform Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Init (No Backend)
+        run: terraform -chdir=infra init -backend=false
+
+      - name: Terraform Validate
+        run: terraform -chdir=infra validate
+
+  yaml-check:
+    name: YAML Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install yamllint
+        run: python -m pip install --upgrade pip yamllint
+
+      - name: Lint workflow and Kubernetes YAML (syntax focused)
+        run: |
+          shopt -s globstar nullglob
+          files=(
+            .github/workflows/**/*.yml
+            .github/workflows/**/*.yaml
+            k8s/**/*.yml
+            k8s/**/*.yaml
+          )
+
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No YAML files found for linting."
+            exit 0
+          fi
+
+          # Keep YAML validation and enforce whitespace hygiene.
+          yamllint -d "{extends: default, rules: {line-length: disable, comments: disable, comments-indentation: disable, document-start: disable, truthy: disable, colons: disable, commas: disable, braces: disable, indentation: disable, new-line-at-end-of-file: disable}}" "${files[@]}"

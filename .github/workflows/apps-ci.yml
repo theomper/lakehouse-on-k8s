@@ -1,0 +1,214 @@
+# .github/workflows/app-ci.yml
+
+name: "Application Deployment Pipeline"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: "Build & Deploy Flink Application & Deploy Kubernetes Manifests"
+    runs-on: ubuntu-latest
+
+    env:
+      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      CLUSTER_NAME: ${{ vars.AKS_CLUSTER_NAME }}
+      PAIMON_VERSION: "1.2.0"
+      FLINK_VERSION: "1.20.2"
+      FLINK_MAJOR_VERSION: "1.20"
+      HADOOP_VERSION: "3.3.6"
+      KAFKA_CONNECTOR_VERSION: "3.3.0-1.20"        # matches Flink 1.20 line
+      PRE_BUNDLED_HADOOP_VERSION: "2.8.3-10.0"
+
+      ACR_LOGIN_SERVER: acrlakehouseonk8s01.azurecr.io
+      STORAGE_ACCOUNT_NAME: stlakehouseonk8s01
+      MANIFESTS_DIR: k8s/manifests
+      FLINK_STANDALONE_DIR: k8s/flink
+      TRINO_VALUES_FILE: k8s/helm/trino-values.yaml
+      KPS_VALUES_FILE: k8s/helm/kube-prometheus-stack-values.yaml
+      IOT_SIM_MANIFEST: k8s/producers/iot-sim-producers.yaml
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Azure CLI login
+        uses: azure/login@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v5
+
+      - name: Get AKS credentials
+        run: az aks get-credentials --resource-group $RESOURCE_GROUP --name $CLUSTER_NAME --overwrite-existing
+
+      - name: Create namespaces
+        run: |
+          kubectl create namespace data-ingest --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create namespace data-processing --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create namespace analytics --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Azure CLI ACR login
+        run: az acr login --name ${{ env.ACR_LOGIN_SERVER }}
+
+      - name: Download Flink, Paimon, Hadoop & Kafka connector JARs
+        run: |
+          set -e
+          mkdir -p docker/lib
+
+          # 1️⃣  Hadoop 3.3.6 client jars (replaces flink-shaded-hadoop-2-uber-2.8.3).
+          #
+          #     Paimon needs core Hadoop classes (Configuration, Path, FileSystem)
+          #     on the local classpath of every process that touches a Paimon
+          #     catalog — including sql-client.sh embedded pods that run
+          #     init.sql / bootstrap.sql / ingest.sql.
+          #
+          #     The old flink-shaded-hadoop-2-uber-2.8.3 provided these, but its
+          #     hadoop-azure 2.8.3 conflicts with the Hadoop 3.x classes shipped
+          #     by flink-azure-fs-hadoop (the Flink plugin), causing JM/TM
+          #     checkpoints to abfs:// to fail with
+          #     `UnsupportedFileSystemException: No FileSystem for scheme "file"`.
+          #
+          #     hadoop-client-runtime + hadoop-client-api 3.3.6 give us the same
+          #     core classes at the version the Flink plugin already uses, so
+          #     there's no version skew. The Flink plugin remains classloader-
+          #     isolated in /opt/flink/plugins/ and handles abfs:// for
+          #     checkpoints + Paimon FlinkFileIO.
+          curl -fL -o docker/lib/hadoop-client-runtime-${HADOOP_VERSION}.jar \
+            https://repo.maven.apache.org/maven2/org/apache/hadoop/hadoop-client-runtime/${HADOOP_VERSION}/hadoop-client-runtime-${HADOOP_VERSION}.jar
+          curl -fL -o docker/lib/hadoop-client-api-${HADOOP_VERSION}.jar \
+            https://repo.maven.apache.org/maven2/org/apache/hadoop/hadoop-client-api/${HADOOP_VERSION}/hadoop-client-api-${HADOOP_VERSION}.jar
+          # hadoop-azure registers the `abfs` scheme via META-INF/services so
+          # Paimon's HadoopFileIO can resolve abfs:// URIs without going through
+          # Flink's FileSystem. Required for the embedded sql-client pods.
+          curl -fL -o docker/lib/hadoop-azure-${HADOOP_VERSION}.jar \
+            https://repo.maven.apache.org/maven2/org/apache/hadoop/hadoop-azure/${HADOOP_VERSION}/hadoop-azure-${HADOOP_VERSION}.jar
+          # Runtime deps of hadoop-azure that hadoop-client-runtime does NOT bundle.
+          curl -fL -o docker/lib/azure-storage-7.0.1.jar \
+            https://repo.maven.apache.org/maven2/com/microsoft/azure/azure-storage/7.0.1/azure-storage-7.0.1.jar
+          curl -fL -o docker/lib/azure-keyvault-core-1.0.0.jar \
+            https://repo.maven.apache.org/maven2/com/microsoft/azure/azure-keyvault-core/1.0.0/azure-keyvault-core-1.0.0.jar
+          curl -fL -o docker/lib/jetty-util-ajax-9.4.53.v20231009.jar \
+            https://repo.maven.apache.org/maven2/org/eclipse/jetty/jetty-util-ajax/9.4.53.v20231009/jetty-util-ajax-9.4.53.v20231009.jar
+
+          # 2️⃣  Azure-specific FS plugin (registers abfs / abfss) ──────────────────
+          # — Azure-FS plugin (goes to /opt/flink/opt by default) —
+          curl -fL -o docker/lib/flink-azure-fs-hadoop-${FLINK_VERSION}.jar \
+            https://repo1.maven.org/maven2/org/apache/flink/flink-azure-fs-hadoop/${FLINK_VERSION}/flink-azure-fs-hadoop-${FLINK_VERSION}.jar
+
+          # 3️⃣  Paimon Bundled & Paimon Azure Jars
+          curl -fL -o docker/lib/paimon-azure-${PAIMON_VERSION}.jar \
+            https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-azure/${PAIMON_VERSION}/paimon-azure-${PAIMON_VERSION}.jar
+
+          curl -fL -o docker/lib/paimon-flink-${FLINK_MAJOR_VERSION}-${PAIMON_VERSION}.jar \
+            https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-${FLINK_MAJOR_VERSION}/${PAIMON_VERSION}/paimon-flink-${FLINK_MAJOR_VERSION}-${PAIMON_VERSION}.jar
+
+          # 4️⃣  Kafka connector
+          curl -fL -o docker/lib/flink-sql-connector-kafka-${KAFKA_CONNECTOR_VERSION}.jar \
+            https://repo.maven.apache.org/maven2/org/apache/flink/flink-sql-connector-kafka/${KAFKA_CONNECTOR_VERSION}/flink-sql-connector-kafka-${KAFKA_CONNECTOR_VERSION}.jar
+
+          ls -lh docker/lib
+
+      - name: Build and push Flink + Paimon image
+        run: |
+          IMAGE_BASE=${{ env.ACR_LOGIN_SERVER }}/flink-paimon-kafka
+          IMAGE_SHA="${IMAGE_BASE}:${GITHUB_SHA::8}"
+          IMAGE_LATEST="${IMAGE_BASE}:latest"
+
+          # Build with both tags
+          docker build -t "$IMAGE_SHA" -t "$IMAGE_LATEST" -f docker/flink-paimon-kafka.Dockerfile docker
+
+          # Push both tags
+          docker push "$IMAGE_SHA"
+          docker push "$IMAGE_LATEST"
+
+          # Set IMAGE env for later steps
+          echo "IMAGE=$IMAGE_LATEST" >> $GITHUB_ENV
+
+      - name: Retrieve Azure Storage account key & (re)create k8s secret
+        id: get-key
+        run: |
+          # Get storage account Access Key
+          ACCOUNT_KEY=$(az storage account keys list \
+            --account-name ${{ env.STORAGE_ACCOUNT_NAME }} \
+            --resource-group $RESOURCE_GROUP \
+            --query "[0].value" -o tsv)
+
+          # Create or update k8s secret in data-processing namespace
+          kubectl create secret generic azure-storage-secret \
+            --from-literal=storage-account-key=$ACCOUNT_KEY \
+            -n data-processing --dry-run=client -o yaml | kubectl apply -f -
+
+          # Also create in analytics namespace
+          kubectl create secret generic azure-storage-secret \
+            --from-literal=storage-account-key=$ACCOUNT_KEY \
+            -n analytics --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy manifests
+        run: |
+          kubectl apply -f k8s/manifests/data-ingest.yaml -n data-ingest
+          kubectl apply -f ${{ env.MANIFESTS_DIR }}/data-processing.yaml -n data-processing
+
+          # Dashboards -> ConfigMaps
+          kubectl -n analytics create configmap grafana-dashboard-iot-live-raw \
+            --from-file=iot-live-raw.json=grafana/iot-live-raw.json \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n analytics create configmap grafana-dashboard-iot-energy-kpis \
+            --from-file=iot-energy-kpis.json=grafana/iot-energy-kpis.json \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n analytics create configmap grafana-dashboard-iot-appliance-intel \
+            --from-file=iot-appliance-intel.json=grafana/iot-appliance-intel.json \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n analytics create configmap grafana-dashboard-iot-data-trust \
+            --from-file=iot-data-trust.json=grafana/iot-data-trust.json \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # Label + folder annotation so kube-prometheus-stack Grafana sidecar imports them
+          kubectl -n analytics label configmap grafana-dashboard-iot-live-raw grafana_dashboard=1 --overwrite
+          kubectl -n analytics label configmap grafana-dashboard-iot-energy-kpis grafana_dashboard=1 --overwrite
+          kubectl -n analytics label configmap grafana-dashboard-iot-appliance-intel grafana_dashboard=1 --overwrite
+          kubectl -n analytics label configmap grafana-dashboard-iot-data-trust grafana_dashboard=1 --overwrite
+          kubectl -n analytics annotate configmap grafana-dashboard-iot-live-raw grafana_folder="IoT" --overwrite
+          kubectl -n analytics annotate configmap grafana-dashboard-iot-energy-kpis grafana_folder="IoT" --overwrite
+          kubectl -n analytics annotate configmap grafana-dashboard-iot-appliance-intel grafana_folder="IoT" --overwrite
+          kubectl -n analytics annotate configmap grafana-dashboard-iot-data-trust grafana_folder="IoT" --overwrite
+
+          kubectl apply -f k8s/manifests/analytics.yaml -n analytics
+          kubectl apply -f k8s/manifests/monitoring.yaml -n monitoring
+          kubectl apply -f ${{ env.IOT_SIM_MANIFEST }} -n data-ingest
+
+          # Flink standalone session cluster
+          kubectl apply -f ${{ env.FLINK_STANDALONE_DIR }}/flink-conf-configmap.yaml -n data-processing
+          kubectl apply -f k8s/flink/flink-jobmanager-service.yaml -n data-processing
+          kubectl apply -f ${{ env.FLINK_STANDALONE_DIR }}/flink-jobmanager-session-deployment-non-ha.yaml -n data-processing
+          kubectl apply -f ${{ env.FLINK_STANDALONE_DIR }}/flink-taskmanager-session-deployment.yaml -n data-processing
+          kubectl apply -f ${{ env.FLINK_STANDALONE_DIR }}/flink-podmonitor.yaml 2>/dev/null || true
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.15.2
+
+      - name: Deploy Trino with Helm
+        run: |
+          helm repo add trino https://trinodb.github.io/charts
+          helm repo update
+          helm upgrade --install trino-standalone trino/trino \
+            --namespace analytics \
+            --create-namespace \
+            -f ${{ env.TRINO_VALUES_FILE }}
+
+      - name: Deploy Prometheus + Grafana (kube-prometheus-stack)
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+          helm upgrade --install kps prometheus-community/kube-prometheus-stack \
+            --namespace monitoring \
+            --create-namespace \
+            -f ${{ env.KPS_VALUES_FILE }}
+
+      - name: Azure CLI logout
+        if: always()
+        run: az logout

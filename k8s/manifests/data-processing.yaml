@@ -1,0 +1,727 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: data-processing
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sql-session-init
+  namespace: data-processing
+data:
+  init.sql: |
+    -- No secrets here; credentials are passed via -D flags
+    CREATE CATALOG IF NOT EXISTS paimon WITH (
+      'type' = 'paimon',
+      'warehouse' = 'abfs://warehouse@stlakehouseonk8s01.dfs.core.windows.net/paimon',
+      'azure.account-name' = 'stlakehouseonk8s01',
+      'property-version' = '1'
+    );
+    USE CATALOG paimon;
+    CREATE DATABASE IF NOT EXISTS iot;
+    USE iot;
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: paimon-bootstrap-sql
+  namespace: data-processing
+data:
+  bootstrap.sql: |
+    -- SAFETY: Drop existing table to ensure schema update (WARNING: Deletes data!)
+    DROP TABLE IF EXISTS sensor_data_raw;
+
+    -- RAW (7 days): partitioned by dt so partition expiration can drop old data.
+    -- Note: primary key includes partition key to avoid cross-partition updates in fixed-bucket mode.
+
+    CREATE TABLE IF NOT EXISTS sensor_data_raw (
+      dt STRING,
+      home_id STRING,
+      plug_id STRING,
+      voltage DOUBLE,
+      current_amp DOUBLE,
+      power_factor DOUBLE,
+      energy_wh DOUBLE,
+      ts TIMESTAMP(3),
+      WATERMARK FOR ts AS ts - INTERVAL '5' SECOND,
+      PRIMARY KEY (dt, home_id, plug_id, ts) NOT ENFORCED
+    )
+    PARTITIONED BY (dt)
+    WITH (
+      'bucket' = '6',
+      'partition.expiration-time' = '7 d',
+      'partition.expiration-check-interval' = '1 h',
+      'snapshot.time-retained' = '7 d'
+    );
+
+    -- HOURLY (historical): keep long-term; dashboards derive day/week/month/year from this table.
+    CREATE TABLE IF NOT EXISTS sensor_data_hourly (
+      dt STRING,
+      home_id STRING,
+      plug_id STRING,
+      window_start TIMESTAMP(3),
+      window_end TIMESTAMP(3),
+      avg_voltage DOUBLE,
+      avg_current DOUBLE,
+      avg_pf DOUBLE,
+      energy_kwh DOUBLE,
+      samples BIGINT,
+      peak_power_w DOUBLE,
+      PRIMARY KEY (dt, home_id, plug_id, window_start) NOT ENFORCED
+    )
+    PARTITIONED BY (dt)
+    WITH (
+      'bucket' = '1',
+      -- keep data indefinitely; just trim snapshot history to control metadata growth
+      'snapshot.time-retained' = '30 d'
+    );
+
+    -- 10-MINUTE aggregation: higher resolution for near-real-time dashboards
+    CREATE TABLE IF NOT EXISTS sensor_data_10min (
+      dt STRING,
+      home_id STRING,
+      plug_id STRING,
+      window_start TIMESTAMP(3),
+      window_end TIMESTAMP(3),
+      avg_voltage DOUBLE,
+      avg_current DOUBLE,
+      avg_pf DOUBLE,
+      energy_kwh DOUBLE,
+      samples BIGINT,
+      peak_power_w DOUBLE,
+      PRIMARY KEY (dt, home_id, plug_id, window_start) NOT ENFORCED
+    )
+    PARTITIONED BY (dt)
+    WITH (
+      'bucket' = '1',
+      -- keep data indefinitely; just trim snapshot history to control metadata growth
+      'snapshot.time-retained' = '30 d'
+    );
+
+    -- 30-MINUTE aggregation: per-tier rollup for the experiment loop.
+    -- Window aligned to wall-clock minute :00 / :30. Mirrors hourly schema
+    -- so existing dashboards/queries can switch tables with one rename.
+    CREATE TABLE IF NOT EXISTS sensor_data_30min (
+      dt STRING,
+      home_id STRING,
+      plug_id STRING,
+      window_start TIMESTAMP(3),
+      window_end TIMESTAMP(3),
+      avg_voltage DOUBLE,
+      avg_current DOUBLE,
+      avg_pf DOUBLE,
+      energy_kwh DOUBLE,
+      samples BIGINT,
+      peak_power_w DOUBLE,
+      PRIMARY KEY (dt, home_id, plug_id, window_start) NOT ENFORCED
+    )
+    PARTITIONED BY (dt)
+    WITH (
+      'bucket' = '1',
+      'snapshot.time-retained' = '30 d'
+    );
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-to-paimon-sql
+  namespace: data-processing
+data:
+  ingest.sql: |
+    -- Source: Kafka JSON -> compute event-time ts_ltz
+    CREATE TEMPORARY TABLE sensor_data_kafka_home  (
+      home_id STRING,
+      plug_id STRING,
+      voltage DOUBLE,
+      `current` DOUBLE,
+      power_factor DOUBLE,
+      energy_wh DOUBLE,
+      `timestamp` STRING,
+      ts_ltz AS TRY_CAST(`timestamp` AS TIMESTAMP_LTZ(3)),
+      WATERMARK FOR ts_ltz AS ts_ltz - INTERVAL '5' SECOND
+    ) WITH (
+      'connector' = 'kafka',
+      'topic' = 'iot-sensor-general',
+      'properties.bootstrap.servers' = 'kafka-0.kafka-svc.data-ingest.svc.cluster.local:9092,kafka-1.kafka-svc.data-ingest.svc.cluster.local:9092',
+      --- 'properties.group.id' = 'flink-iot-ingest',
+      'properties.group.id' = 'flink-iot-ingest-v7',
+      'scan.startup.mode' = 'earliest-offset',
+      ---'value.format' = 'json',
+      ---'json.timestamp-format.standard' = 'ISO-8601',
+      ---'json.fail-on-missing-field' = 'false',
+      ---'json.ignore-parse-errors' = 'true'
+      'value.format' = 'json',
+      'value.json.timestamp-format.standard' = 'ISO-8601',
+      --- 'value.json.fail-on-missing-field' = 'false',
+      'value.json.ignore-parse-errors' = 'true'
+    );
+
+    CREATE TEMPORARY TABLE sensor_data_kafka_plug  (
+      home_id STRING,
+      plug_id STRING,
+      voltage DOUBLE,
+      `current` DOUBLE,
+      power_factor DOUBLE,
+      energy_wh DOUBLE,
+      `timestamp` STRING,
+      ts_ltz AS TRY_CAST(`timestamp` AS TIMESTAMP_LTZ(3)),
+      WATERMARK FOR ts_ltz AS ts_ltz - INTERVAL '5' SECOND
+    ) WITH (
+      'connector' = 'kafka',
+      'topic' = 'iot-sensor-plug',
+      'properties.bootstrap.servers' = 'kafka-0.kafka-svc.data-ingest.svc.cluster.local:9092,kafka-1.kafka-svc.data-ingest.svc.cluster.local:9092',
+      --- 'properties.group.id' = 'flink-iot-ingest',
+      'properties.group.id' = 'flink-iot-ingest-v7',
+      'scan.startup.mode' = 'earliest-offset',
+      ---'value.format' = 'json',
+      ---'json.timestamp-format.standard' = 'ISO-8601',
+      ---'json.fail-on-missing-field' = 'false',
+      ---'json.ignore-parse-errors' = 'true'
+      'value.format' = 'json',
+      'value.json.timestamp-format.standard' = 'ISO-8601',
+      --- 'value.json.fail-on-missing-field' = 'false',
+      'value.json.ignore-parse-errors' = 'true'
+    );
+
+    -- Union the two Kafka sources
+    CREATE TEMPORARY VIEW sensor_data_kafka_all AS
+    SELECT * FROM sensor_data_kafka_home
+    UNION ALL
+    SELECT * FROM sensor_data_kafka_plug;
+
+    -- Keep PK NOT NULL: coalesce plug_id; drop rows with bad timestamps/home_ids
+    -- Ingest into RAW and derive dt from ts (dt drives partition TTL)
+    INSERT INTO sensor_data_raw
+    SELECT
+      DATE_FORMAT(ts, 'yyyy-MM-dd') AS dt,
+      home_id,
+      COALESCE(plug_id, 'general') AS plug_id,
+      voltage,
+      `current` AS current_amp,
+      power_factor,
+      energy_wh,
+      ts
+    FROM (
+      SELECT
+        home_id,
+        plug_id,
+        voltage,
+        `current`,
+        power_factor,
+        energy_wh,
+        COALESCE(
+          CAST(ts_ltz AS TIMESTAMP(3)),            -- preferred: parsed event-time
+          CAST(CURRENT_TIMESTAMP AS TIMESTAMP(3))  -- fallback: processing-time
+        ) AS ts
+      FROM sensor_data_kafka_all
+      WHERE home_id IS NOT NULL
+    ) t;
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hourly-aggregation-sql
+  namespace: data-processing
+data:
+  hourly.sql: |
+    -- Aggregate RAW -> HOURLY.
+    -- Two-view pattern: strip WATERMARK rowtime FIRST (raw_no_wm), then apply
+    -- ts/dt filters (raw_recent). The watermark-strip cast must be in its own
+    -- view so the WHERE on ts binds to the cast alias, not the rowtime column.
+    --
+    -- Bounded lookback (3h) keeps scan cost roughly constant: one completed
+    -- window + slack for late data. Requires session timezone to match the
+    -- timezone the streaming ingest used to write `ts` (both UTC, set via
+    -- -Dtable.local-time-zone=UTC on the CronJob).
+    CREATE TEMPORARY VIEW raw_no_wm AS
+    SELECT
+      dt, home_id, plug_id, voltage, current_amp, power_factor, energy_wh,
+      CAST(ts AS TIMESTAMP(3)) AS ts
+    FROM sensor_data_raw;
+
+    CREATE TEMPORARY VIEW raw_recent AS
+    SELECT * FROM raw_no_wm
+    WHERE dt >= DATE_FORMAT(CAST(CURRENT_TIMESTAMP AS TIMESTAMP(3)) - INTERVAL '1' DAY, 'yyyy-MM-dd')
+      AND ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP(3)) - INTERVAL '3' HOUR;
+
+    -- Only emit windows whose end has elapsed; partial windows would otherwise be
+    -- written and immediately overwritten on the next run (wasted I/O + UPSERTs).
+    INSERT INTO sensor_data_hourly
+    SELECT
+      DATE_FORMAT(window_start, 'yyyy-MM-dd')         AS dt,
+      home_id,
+      plug_id,
+      window_start,
+      window_start + INTERVAL '1' HOUR                AS window_end,
+      AVG(voltage)                                    AS avg_voltage,
+      AVG(current_amp)                                AS avg_current,
+      AVG(power_factor)                               AS avg_pf,
+      SUM(energy_wh) / 1000.0                         AS energy_kwh,
+      COUNT(*)                                        AS samples,
+      MAX(voltage * current_amp * power_factor)        AS peak_power_w
+    FROM (
+      SELECT *,
+        CAST(DATE_FORMAT(ts, 'yyyy-MM-dd HH:00:00') AS TIMESTAMP(3)) AS window_start
+      FROM raw_recent
+    ) t
+    WHERE window_start + INTERVAL '1' HOUR <= CAST(CURRENT_TIMESTAMP AS TIMESTAMP(3))
+    GROUP BY home_id, plug_id, window_start;
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tenmin-aggregation-sql
+  namespace: data-processing
+data:
+  tenmin.sql: |
+    -- Aggregate RAW -> 10-MINUTE.
+    -- Two-view pattern: strip WATERMARK rowtime FIRST (raw_no_wm_10m), then
+    -- apply ts/dt filters (raw_recent_10m). The watermark-strip cast must be
+    -- in its own view so the WHERE on ts binds to the cast alias, not the
+    -- rowtime column.
+    --
+    -- Bounded lookback (15 min) covers one completed 10-min window + 5 min
+    -- slack for late data. Reduced from 40 min: at high RPS (25k+) the 40-min
+    -- window scans 60M rows per run, saturating the TM and starving the
+    -- streaming job's checkpoint threads. Experiment events are near-real-time
+    -- so 5 min of slack is sufficient.
+    CREATE TEMPORARY VIEW raw_no_wm_10m AS
+    SELECT
+      dt, home_id, plug_id, voltage, current_amp, power_factor, energy_wh,
+      CAST(ts AS TIMESTAMP(3)) AS ts
+    FROM sensor_data_raw;
+
+    CREATE TEMPORARY VIEW raw_recent_10m AS
+    SELECT * FROM raw_no_wm_10m
+    WHERE dt >= DATE_FORMAT(CAST(CURRENT_TIMESTAMP AS TIMESTAMP(3)) - INTERVAL '1' DAY, 'yyyy-MM-dd')
+      AND ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP(3)) - INTERVAL '15' MINUTE;
+
+    -- Only emit windows whose end has elapsed; partial windows would otherwise be
+    -- written and immediately overwritten on the next run (wasted I/O + UPSERTs).
+    INSERT INTO sensor_data_10min
+    SELECT
+      DATE_FORMAT(window_start, 'yyyy-MM-dd')         AS dt,
+      home_id,
+      plug_id,
+      window_start,
+      window_start + INTERVAL '10' MINUTE             AS window_end,
+      AVG(voltage)                                    AS avg_voltage,
+      AVG(current_amp)                                AS avg_current,
+      AVG(power_factor)                               AS avg_pf,
+      SUM(energy_wh) / 1000.0                         AS energy_kwh,
+      COUNT(*)                                        AS samples,
+      MAX(voltage * current_amp * power_factor)        AS peak_power_w
+    FROM (
+      SELECT *,
+        CAST(
+          DATE_FORMAT(ts, 'yyyy-MM-dd HH:') ||
+          LPAD(CAST((CAST(DATE_FORMAT(ts, 'm') AS INT) / 10) * 10 AS STRING), 2, '0') ||
+          ':00'
+          AS TIMESTAMP(3)
+        ) AS window_start
+      FROM raw_recent_10m
+    ) t
+    WHERE window_start + INTERVAL '10' MINUTE <= CAST(CURRENT_TIMESTAMP AS TIMESTAMP(3))
+    GROUP BY home_id, plug_id, window_start;
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: thirtymin-aggregation-sql
+  namespace: data-processing
+data:
+  thirtymin.sql: |
+    -- Aggregate RAW -> 30-MINUTE.
+    -- Per-experiment-tier rollup: fired once per sub-phase post-flush by the
+    -- orchestrator. Same WATERMARK-stripping trick as tenmin/hourly: strip
+    -- WATERMARK FIRST so the WHERE on ts binds to the cast alias, not the
+    -- watermark-annotated column.
+    --
+    -- Bounded lookback (1h) covers one completed 30-min window + 30 min slack
+    -- for late data. Requires session timezone to match the timezone the
+    -- streaming ingest used to write `ts` (both UTC, set via
+    -- -Dtable.local-time-zone=UTC on the CronJob).
+    CREATE TEMPORARY VIEW raw_no_wm_30m AS
+    SELECT
+      dt, home_id, plug_id, voltage, current_amp, power_factor, energy_wh,
+      CAST(ts AS TIMESTAMP(3)) AS ts
+    FROM sensor_data_raw;
+
+    CREATE TEMPORARY VIEW raw_recent_30m AS
+    SELECT * FROM raw_no_wm_30m
+    WHERE dt >= DATE_FORMAT(CAST(CURRENT_TIMESTAMP AS TIMESTAMP(3)) - INTERVAL '1' DAY, 'yyyy-MM-dd')
+      AND ts >= CAST(CURRENT_TIMESTAMP AS TIMESTAMP(3)) - INTERVAL '1' HOUR;
+
+    INSERT INTO sensor_data_30min
+    SELECT
+      DATE_FORMAT(window_start, 'yyyy-MM-dd')         AS dt,
+      home_id,
+      plug_id,
+      window_start,
+      window_start + INTERVAL '30' MINUTE             AS window_end,
+      AVG(voltage)                                    AS avg_voltage,
+      AVG(current_amp)                                AS avg_current,
+      AVG(power_factor)                               AS avg_pf,
+      SUM(energy_wh) / 1000.0                         AS energy_kwh,
+      COUNT(*)                                        AS samples,
+      MAX(voltage * current_amp * power_factor)        AS peak_power_w
+    FROM (
+      SELECT *,
+        CAST(
+          DATE_FORMAT(ts, 'yyyy-MM-dd HH:') ||
+          LPAD(CAST((CAST(DATE_FORMAT(ts, 'm') AS INT) / 30) * 30 AS STRING), 2, '0') ||
+          ':00'
+          AS TIMESTAMP(3)
+        ) AS window_start
+      FROM raw_recent_30m
+    ) t
+    WHERE window_start + INTERVAL '30' MINUTE <= CAST(CURRENT_TIMESTAMP AS TIMESTAMP(3))
+    GROUP BY home_id, plug_id, window_start;
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tenmin-aggregation
+  namespace: data-processing
+spec:
+  # Auto-schedule disabled: the experiment orchestrator creates a Job from this
+  # template (kubectl create job --from=cronjob/tenmin-aggregation) after each
+  # tier so it can synchronise metric collection with aggregation completion.
+  # Auto-firing on '*/10 * * * *' produced concurrent Flink batch jobs that
+  # starved task slots (concurrencyPolicy: Forbid does NOT cover --from=cronjob
+  # invocations, only scheduled ones).
+  suspend: true
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 540
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: sql-client
+            image: acrlakehouseonk8s01.azurecr.io/flink-paimon-kafka:latest
+            imagePullPolicy: Always
+            env:
+            - name: AZURE_STORAGE_ACCOUNT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: azure-storage-secret
+                  key: storage-account-key
+            command: ["/bin/bash","-lc"]
+            args:
+              - |
+                set -o pipefail
+                /opt/flink/bin/sql-client.sh embedded \
+                  -Drest.address=flink-jobmanager \
+                  -Drest.port=8081 \
+                  -Dparallelism.default=2 \
+                  -Dtable.local-time-zone=UTC \
+                  -Dexecution.runtime-mode=batch \
+                  -Dexecution.attached=true \
+                  -Dfs.azure.account.key.stlakehouseonk8s01.dfs.core.windows.net=$AZURE_STORAGE_ACCOUNT_KEY \
+                  -Dazure.account-key=$AZURE_STORAGE_ACCOUNT_KEY \
+                  -i /sql/init.sql \
+                  -f /sql/tenmin.sql
+                rc=$?
+                if [ $rc -ne 0 ]; then
+                  echo "==================== sql-client failed (rc=$rc); dumping log ===================="
+                  for f in /opt/flink/log/flink-*-sql-client-*.log /opt/flink/log/flink--sqlclient-*.log /opt/flink/log/*.log; do
+                    [ -f "$f" ] || continue
+                    echo "--- $f ---"
+                    cat "$f"
+                  done
+                  exit $rc
+                fi
+            volumeMounts:
+            - name: init
+              mountPath: /sql/init.sql
+              subPath: init.sql
+            - name: sql
+              mountPath: /sql/tenmin.sql
+              subPath: tenmin.sql
+          volumes:
+          - name: init
+            configMap:
+              name: sql-session-init
+          - name: sql
+            configMap:
+              name: tenmin-aggregation-sql
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: paimon-bootstrap
+  namespace: data-processing
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: sql-client
+        image: acrlakehouseonk8s01.azurecr.io/flink-paimon-kafka:latest
+        imagePullPolicy: Always
+        env:
+        - name: AZURE_STORAGE_ACCOUNT_KEY
+          valueFrom:
+            secretKeyRef:
+              name: azure-storage-secret
+              key: storage-account-key
+        command: ["/bin/bash","-lc"]
+        args:
+          - |
+            set -o pipefail
+            /opt/flink/bin/sql-client.sh embedded \
+              -Drest.address=flink-jobmanager \
+              -Drest.port=8081 \
+              -Dfs.azure.account.key.stlakehouseonk8s01.dfs.core.windows.net=$AZURE_STORAGE_ACCOUNT_KEY \
+              -Dazure.account-key=$AZURE_STORAGE_ACCOUNT_KEY \
+              -i /sql/init.sql \
+              -f /sql/bootstrap.sql
+            rc=$?
+            if [ $rc -ne 0 ]; then
+              echo "==================== sql-client failed (rc=$rc); dumping log ===================="
+              for f in /opt/flink/log/flink-*-sql-client-*.log /opt/flink/log/flink--sqlclient-*.log /opt/flink/log/*.log; do
+                [ -f "$f" ] || continue
+                echo "--- $f ---"
+                cat "$f"
+              done
+              exit $rc
+            fi
+        volumeMounts:
+        - name: init
+          mountPath: /sql/init.sql
+          subPath: init.sql
+        - name: sql
+          mountPath: /sql/bootstrap.sql
+          subPath: bootstrap.sql
+      volumes:
+      - name: init
+        configMap:
+          name: sql-session-init
+          items:
+          - key: init.sql
+            path: init.sql
+      - name: sql
+        configMap:
+          name: paimon-bootstrap-sql
+          items:
+          - key: bootstrap.sql
+            path: bootstrap.sql
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: flink-submit-kafka-to-paimon
+  namespace: data-processing
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: sql-client
+        image: acrlakehouseonk8s01.azurecr.io/flink-paimon-kafka:latest
+        imagePullPolicy: Always
+        env:
+        - name: AZURE_STORAGE_ACCOUNT_KEY
+          valueFrom:
+            secretKeyRef:
+              name: azure-storage-secret
+              key: storage-account-key
+        command: ["/bin/bash","-lc"]
+        args:
+          - |
+            set -o pipefail
+            /opt/flink/bin/sql-client.sh embedded \
+              -Drest.address=flink-jobmanager \
+              -Drest.port=8081 \
+              -Dparallelism.default=4 \
+              -Dtable.exec.resource.default-parallelism=4 \
+              -Dexecution.checkpointing.dir=abfs://checkpoints@stlakehouseonk8s01.dfs.core.windows.net/flink-checkpoints \
+              -Dexecution.runtime-mode=streaming \
+              -Dexecution.checkpointing.mode=EXACTLY_ONCE \
+              -Dexecution.checkpointing.interval=60s \
+              -Dexecution.checkpointing.timeout=120s \
+              -Dexecution.checkpointing.unaligned=false \
+              -Dexecution.checkpointing.tolerable-failed-checkpoints=5 \
+              -Dfs.azure.account.key.stlakehouseonk8s01.dfs.core.windows.net=$AZURE_STORAGE_ACCOUNT_KEY \
+              -Dazure.account-key=$AZURE_STORAGE_ACCOUNT_KEY \
+              -i /sql/init.sql \
+              -f /sql/ingest.sql
+            rc=$?
+            if [ $rc -ne 0 ]; then
+              echo "==================== sql-client failed (rc=$rc); dumping log ===================="
+              for f in /opt/flink/log/flink-*-sql-client-*.log /opt/flink/log/flink--sqlclient-*.log /opt/flink/log/*.log; do
+                [ -f "$f" ] || continue
+                echo "--- $f ---"
+                cat "$f"
+              done
+              exit $rc
+            fi
+        volumeMounts:
+        - name: init
+          mountPath: /sql/init.sql
+          subPath: init.sql
+        - name: sql
+          mountPath: /sql/ingest.sql
+          subPath: ingest.sql
+      volumes:
+      - name: init
+        configMap:
+          name: sql-session-init
+      - name: sql
+        configMap:
+          name: kafka-to-paimon-sql
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: hourly-aggregation
+  namespace: data-processing
+spec:
+  # Auto-schedule disabled: see notes on tenmin-aggregation. The orchestrator
+  # triggers this template manually post-tier; suspend prevents the auto firing
+  # that previously raced with the manual trigger and consumed Flink slots.
+  suspend: true
+  schedule: "10 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 900
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: sql-client
+            image: acrlakehouseonk8s01.azurecr.io/flink-paimon-kafka:latest
+            imagePullPolicy: Always
+            env:
+            - name: AZURE_STORAGE_ACCOUNT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: azure-storage-secret
+                  key: storage-account-key
+            command: ["/bin/bash","-lc"]
+            args:
+              - |
+                set -o pipefail
+                /opt/flink/bin/sql-client.sh embedded \
+                  -Drest.address=flink-jobmanager \
+                  -Drest.port=8081 \
+                  -Dparallelism.default=2 \
+                  -Dtable.local-time-zone=UTC \
+                  -Dexecution.runtime-mode=batch \
+                  -Dexecution.attached=true \
+                  -Dfs.azure.account.key.stlakehouseonk8s01.dfs.core.windows.net=$AZURE_STORAGE_ACCOUNT_KEY \
+                  -Dazure.account-key=$AZURE_STORAGE_ACCOUNT_KEY \
+                  -i /sql/init.sql \
+                  -f /sql/hourly.sql
+                rc=$?
+                if [ $rc -ne 0 ]; then
+                  echo "==================== sql-client failed (rc=$rc); dumping log ===================="
+                  for f in /opt/flink/log/flink-*-sql-client-*.log /opt/flink/log/flink--sqlclient-*.log /opt/flink/log/*.log; do
+                    [ -f "$f" ] || continue
+                    echo "--- $f ---"
+                    cat "$f"
+                  done
+                  exit $rc
+                fi
+            volumeMounts:
+            - name: init
+              mountPath: /sql/init.sql
+              subPath: init.sql
+            - name: sql
+              mountPath: /sql/hourly.sql
+              subPath: hourly.sql
+          volumes:
+          - name: init
+            configMap:
+              name: sql-session-init
+          - name: sql
+            configMap:
+              name: hourly-aggregation-sql
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: thirtymin-aggregation
+  namespace: data-processing
+spec:
+  # Auto-schedule disabled by design: this template is invoked once per
+  # experiment sub-phase by the orchestrator (Invoke-30minAggregation) via
+  # `kubectl create job --from=cronjob/thirtymin-aggregation`. The schedule
+  # below is a placeholder so the CronJob object validates; it will never fire
+  # while suspend: true.
+  suspend: true
+  schedule: "*/30 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: sql-client
+            image: acrlakehouseonk8s01.azurecr.io/flink-paimon-kafka:latest
+            imagePullPolicy: Always
+            env:
+            - name: AZURE_STORAGE_ACCOUNT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: azure-storage-secret
+                  key: storage-account-key
+            command: ["/bin/bash","-lc"]
+            args:
+              - |
+                set -o pipefail
+                /opt/flink/bin/sql-client.sh embedded \
+                  -Drest.address=flink-jobmanager \
+                  -Drest.port=8081 \
+                  -Dparallelism.default=2 \
+                  -Dtable.local-time-zone=UTC \
+                  -Dexecution.runtime-mode=batch \
+                  -Dexecution.attached=true \
+                  -Dfs.azure.account.key.stlakehouseonk8s01.dfs.core.windows.net=$AZURE_STORAGE_ACCOUNT_KEY \
+                  -Dazure.account-key=$AZURE_STORAGE_ACCOUNT_KEY \
+                  -i /sql/init.sql \
+                  -f /sql/thirtymin.sql
+                rc=$?
+                if [ $rc -ne 0 ]; then
+                  echo "==================== sql-client failed (rc=$rc); dumping log ===================="
+                  for f in /opt/flink/log/flink-*-sql-client-*.log /opt/flink/log/flink--sqlclient-*.log /opt/flink/log/*.log; do
+                    [ -f "$f" ] || continue
+                    echo "--- $f ---"
+                    cat "$f"
+                  done
+                  exit $rc
+                fi
+            volumeMounts:
+            - name: init
+              mountPath: /sql/init.sql
+              subPath: init.sql
+            - name: sql
+              mountPath: /sql/thirtymin.sql
+              subPath: thirtymin.sql
+          volumes:
+          - name: init
+            configMap:
+              name: sql-session-init
+          - name: sql
+            configMap:
+              name: thirtymin-aggregation-sql

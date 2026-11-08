@@ -1,0 +1,67 @@
+# k8s/helm/kps-values.yaml
+# AKS: control-plane endpoints are managed/unreachable -> disable those scrapes to avoid noisy "down" targets.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    nodeSelector:
+      agentpool: systempool
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 50Gi
+          # storageClassName: managed-csi   # (optional) set if your default SC differs
+
+grafana:
+  enabled: true
+  nodeSelector:
+    agentpool: systempool
+
+  # Install your Trino plugin inside kube-prometheus-stack Grafana
+  plugins:
+    - trino-datasource
+
+  # Persist Grafana (Azure Disk RWO)
+  persistence:
+    enabled: true
+    size: 10Gi
+    # storageClassName: managed-csi       # (optional) set if your default SC differs
+
+  # OPTIONAL: expose Grafana like you did before (creates Azure LB)
+  service:
+    type: LoadBalancer
+    port: 80
+
+  sidecar:
+    # Load dashboards from ConfigMaps labeled grafana_dashboard=1
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+      folderAnnotation: grafana_folder
+
+    # Load datasources from ConfigMaps labeled grafana_datasource=1
+    datasources:
+      enabled: true
+      label: grafana_datasource
+      labelValue: "1"
+      searchNamespace: ALL
+
+# Ensure kubelet/cAdvisor scraping (CPU/mem/net/fs, incl. container metrics)
+kubelet:
+  enabled: true
+  serviceMonitor:
+    https: true
+    insecureSkipVerify: true
+    cAdvisor: true
+    resource: true

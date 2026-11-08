@@ -1,0 +1,7 @@
+﻿{
+    "restarted_count":  1,
+    "any_restarts":  true,
+    "delta":  {
+                  "data-processing/flink-jobmanager-546d55bf4f-xbm7h":  1
+              }
+}

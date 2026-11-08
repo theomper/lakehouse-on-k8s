@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flink-taskmanager
+  namespace: data-processing
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: flink
+      component: taskmanager
+  template:
+    metadata:
+      labels:
+        app: flink
+        component: taskmanager
+    spec:
+      nodeSelector:
+        agentpool: userpool
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: flink
+                  component: taskmanager
+              topologyKey: kubernetes.io/hostname
+      # serviceAccountName: flink-app-sa
+      containers:
+      - name: taskmanager
+        image: acrlakehouseonk8s01.azurecr.io/flink-paimon-kafka:latest
+        args: ["taskmanager"]
+        env:
+          - name: AZURE_STORAGE_ACCOUNT_KEY
+            valueFrom:
+              secretKeyRef:
+                name: azure-storage-secret
+                key: storage-account-key
+          - name: ENABLE_BUILT_IN_PLUGINS
+            value: flink-azure-fs-hadoop-1.20.2.jar
+        ports:
+        - containerPort: 9249
+          name: metrics
+        - containerPort: 6122
+          name: rpc
+        livenessProbe:
+          tcpSocket:
+            port: 6122
+          initialDelaySeconds: 30
+          periodSeconds: 60
+        resources:
+          requests:
+            cpu: "2"
+            memory: "8Gi"
+        volumeMounts:
+        - name: flink-config-volume
+          mountPath: /opt/flink/conf/
+        securityContext:
+          runAsUser: 9999  # refers to user _flink_ from official flink image, change if necessary
+      volumes:
+      - name: flink-config-volume
+        configMap:
+          name: flink-config
+          items:
+          - key: config.yaml
+            path: config.yaml
+          - key: log4j-console.properties
+            path: log4j-console.properties
